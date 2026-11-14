@@ -150,15 +150,6 @@
         <label class="check small"><input type="checkbox" id="aero-marker" checked> 重心（●）と機首の向き（→）を表示</label>
       </section>
 
-      <section id="throw">
-        <h2>試し投げ</h2>
-        <label class="field">速さ <input type="range" id="throw-speed" min="2" max="15" step="0.5" value="8"> <span id="throw-speed-v" class="val"></span></label>
-        <label class="field">角度 <input type="range" id="throw-angle" min="-15" max="45" step="1" value="5"> <span id="throw-angle-v" class="val"></span></label>
-        <canvas id="traj" width="440" height="300" aria-label="飛んだ道すじ（横から見た図と上から見た図）"></canvas>
-        <p id="throw-result" class="result"></p>
-        <p class="muted small">上：横から見た図、下：上から見た図。手を離す高さは 1.6 m。</p>
-      </section>
-
       <section>
         <h2>見本</h2>
         <div id="presets" class="row wrap"></div>
@@ -285,8 +276,26 @@
     </div>
   </div>
 
-  <!-- 画面の切り替え演出 -->
-  <div id="wipe" aria-hidden="true"><span>✈</span></div>
+  <!-- 折り紙からコースへのローディング画面 -->
+  <div id="loading" class="screen" hidden>
+    <div class="ld-sky" aria-hidden="true"><span class="ld-plane">✈</span></div>
+    <div class="ld-box">
+      <div class="ld-title" id="ld-title">コースへ移動中…</div>
+      <div class="ld-bar"><div id="ld-fill"></div></div>
+      <div class="tip-card" aria-live="polite">
+        <div class="tip-cat"><span id="tip-icon"></span> <span id="tip-cat"></span></div>
+        <h3 id="tip-title"></h3>
+        <p id="tip-text"></p>
+        <div class="tip-nav">
+          <button id="tip-prev" title="前のヒント (←)">◀</button>
+          <span id="tip-count" class="muted small"></span>
+          <button id="tip-next" title="次のヒント (→)">▶</button>
+        </div>
+      </div>
+      <button id="ld-start" class="primary big" disabled>読み込み中…</button>
+      <p class="muted small">← → でヒントを切り替え / Space・Enter でスタート</p>
+    </div>
+  </div>
 
   <script type="module" src="js/main.js"></script>
 </body>

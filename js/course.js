@@ -12,7 +12,9 @@ import { randomWind, windVector, windField, CALM } from './wind.js';
 const RAD = Math.PI / 180;
 const HAND = new THREE.Vector3(0, 0, 1.6); // 手を離す位置（flight.js の height と合わせる）
 // 腕（肩から手まで 0.6m、肩の高さ 1.38m）を前に振り上げて、手が HAND の高さになる角度
-const RELEASE_ARM = Math.PI - Math.acos((HAND.z - 1.38) / 0.6);
+const HIP = 0.88;        // 腰の高さ（上半身を回す中心）
+const SHOULDER_Z = 1.38; // 肩の高さ
+const RELEASE_ARM = Math.PI - Math.acos((HAND.z - SHOULDER_Z) / 0.6);
 const RELEASE_REACH = 0.6 * Math.sin(RELEASE_ARM); // そのときの手の前への距離
 
 export { THROW_LIMITS, SWING, speedFromPower, swingResult };
@@ -151,9 +153,9 @@ export class Course {
     s.add(new THREE.HemisphereLight(0xffffff, 0x7a9a5a, 1.4));
     const sun = new THREE.DirectionalLight(0xffffff, 1.8);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(1024, 1024);
+    sun.shadow.mapSize.set(2048, 2048);
     const sc = sun.shadow.camera;
-    sc.left = -3; sc.right = 3; sc.top = 3; sc.bottom = -3; sc.near = 0.5; sc.far = 30;
+    sc.left = -6; sc.right = 6; sc.top = 6; sc.bottom = -6; sc.near = 0.5; sc.far = 40;
     sun.shadow.bias = -0.0005;
     sun.shadow.normalBias = 0.02;
     s.add(sun, sun.target);
@@ -326,34 +328,57 @@ export class Course {
     this.fluff.geometry.attributes.position.needsUpdate = true;
   }
 
+  // 投げる人。足もとが原点で、腰から上（upper）をひねったり前に倒したりできる
   buildThrower() {
     const g = new THREE.Group();
-    const skin = new THREE.MeshStandardMaterial({ color: 0xf0c7a0, roughness: 0.8 });
-    const shirt = new THREE.MeshStandardMaterial({ color: 0x3a6fb5, roughness: 0.8 });
-    const pants = new THREE.MeshStandardMaterial({ color: 0x3b3f4a, roughness: 0.9 });
-    const add = (mesh, x, y, z) => { mesh.position.set(x, y, z); mesh.castShadow = true; g.add(mesh); return mesh; };
-    const cyl = (r, h, mat) => {
-      const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 14), mat);
-      m.rotation.x = Math.PI / 2; // 縦向き（z）に
-      return m;
+    const mat = (color, roughness = 0.8) => new THREE.MeshStandardMaterial({ color, roughness });
+    const skin = mat(0xf0c7a0);
+    const shirt = mat(0x3a6fb5);
+    const pants = mat(0x3b3f4a, 0.9);
+    const shoe = mat(0xf4f4f4, 0.6);
+    const hair = mat(0x2b2018, 0.9);
+    const cyl = (r, h, m, r2 = r) => {
+      const c = new THREE.Mesh(new THREE.CylinderGeometry(r2, r, h, 14), m);
+      c.rotation.x = Math.PI / 2; // 縦向き（z）に
+      c.castShadow = true;
+      return c;
     };
-    add(cyl(0.07, 0.85, pants), 0, 0.1, 0.425);
-    add(cyl(0.07, 0.85, pants), 0, -0.1, 0.425);
-    add(new THREE.Mesh(new THREE.CapsuleGeometry(0.17, 0.4, 6, 14), shirt), 0, 0, 1.15).rotation.x = Math.PI / 2;
-    add(new THREE.Mesh(new THREE.SphereGeometry(0.12, 20, 14), skin), 0, 0, 1.62);
-    // 左腕（下ろしたまま）
-    const la = add(cyl(0.045, 0.55, shirt), 0, 0.23, 1.12);
-    la.rotation.y = 0.15;
-    // 右腕：肩を中心に回す
+    const put = (parent, mesh, x, y, z) => { mesh.position.set(x, y, z); mesh.castShadow = true; parent.add(mesh); return mesh; };
+
+    // 足：左足を一歩前に出して構える
+    for (const [y, x] of [[0.11, 0.12], [-0.11, -0.08]]) {
+      put(g, cyl(0.075, 0.86, pants, 0.065), x, y, 0.45);
+      const s = put(g, new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.11, 0.08), shoe), x + 0.05, y, 0.04);
+      s.castShadow = true;
+    }
+    // 上半身（腰を中心に回す）
+    const upper = new THREE.Group();
+    upper.position.z = HIP;
+    g.add(upper);
+    const torso = put(upper, new THREE.Mesh(new THREE.CapsuleGeometry(0.17, 0.36, 6, 16), shirt), 0, 0, 0.3);
+    torso.rotation.x = Math.PI / 2;
+    torso.scale.set(1, 1, 0.8); // 前後に少し薄く
+    put(upper, cyl(0.06, 0.08, skin), 0, 0, 0.63); // 首
+    put(upper, new THREE.Mesh(new THREE.SphereGeometry(0.12, 24, 16), skin), 0.01, 0, 0.76);
+    // 髪（後ろと上をおおう）
+    const hairCap = put(upper, new THREE.Mesh(new THREE.SphereGeometry(0.128, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.55), hair), -0.015, 0, 0.775);
+    hairCap.rotation.x = Math.PI / 2;
+    hairCap.rotation.z = Math.PI / 2;
+    hairCap.rotation.order = 'ZXY';
+    // 左腕：肩を中心に回す（投げるときに前へ出して狙う）
+    const lShoulder = new THREE.Group();
+    lShoulder.position.set(0, 0.23, SHOULDER_Z - HIP);
+    put(lShoulder, cyl(0.045, 0.56, shirt), 0, 0, -0.28);
+    put(lShoulder, new THREE.Mesh(new THREE.SphereGeometry(0.05, 12, 10), skin), 0, 0, -0.58);
+    upper.add(lShoulder);
+    // 右腕：投げる腕
     const shoulder = new THREE.Group();
-    shoulder.position.set(0, -0.23, 1.38);
-    const arm = cyl(0.045, 0.58, shirt);
-    arm.position.set(0, 0, -0.29);
-    arm.castShadow = true;
-    const hand = new THREE.Mesh(new THREE.SphereGeometry(0.05, 12, 10), skin);
-    hand.position.set(0, 0, -0.6);
-    shoulder.add(arm, hand);
-    g.add(shoulder);
+    shoulder.position.set(0, -0.23, SHOULDER_Z - HIP);
+    put(shoulder, cyl(0.045, 0.58, shirt), 0, 0, -0.29);
+    const hand = put(shoulder, new THREE.Mesh(new THREE.SphereGeometry(0.05, 12, 10), skin), 0, 0, -0.6);
+    upper.add(shoulder);
+    this.upper = upper;
+    this.lShoulder = lShoulder;
     this.shoulder = shoulder;
     this.handMesh = hand;
     this.thrower = g;
@@ -529,6 +554,12 @@ export class Course {
     }
     // 肩の回転（y 軸まわり。正で腕が前へ）
     this.shoulder.rotation.y = -armAngle;
+    // 振りかぶるほど上半身をひねり（右肩を後ろへ）、左腕を前に出して狙う。手を離す瞬間はひねりなし
+    const windup = Math.max(0, Math.min(1, (RELEASE_ARM - armAngle) / (RELEASE_ARM + 1.8)));
+    const after = this.phase === 'flying' || this.phase === 'landed'
+      ? Math.max(0, 1 - Math.abs(this.flightT - 0.35) / 0.6) : 0; // 投げたあとの前かがみ
+    this.upper.rotation.set(0, 0.28 * after, -0.55 * windup, 'ZYX');
+    this.lShoulder.rotation.y = -(0.25 + 1.2 * windup) + 0.6 * after;
     // 腕を振り切った手の位置が、手を離す位置（HAND）にくるよう立たせる
     const yw = this.yaw * RAD;
     this.thrower.rotation.z = yw;
@@ -570,10 +601,15 @@ export class Course {
     }
     this.updateCamera(dt);
     this.updateWind(dt);
-    // 影を紙飛行機の近くに落とす
-    const p = this.planeOuter.position;
-    this.sun.position.set(p.x - 3, p.y - 4, 10);
-    this.sun.target.position.set(p.x, p.y, 0);
+    // 影は、カメラの少し先（人や紙飛行機が見えている辺り）を中心に落とす
+    const cam = this.camera.position;
+    const dir = new THREE.Vector3();
+    this.camera.getWorldDirection(dir);
+    dir.z = 0;
+    if (dir.lengthSq() > 1e-6) dir.normalize();
+    const cx = cam.x + dir.x * 3.5, cy = cam.y + dir.y * 3.5;
+    this.sun.position.set(cx - 3, cy - 4, 10);
+    this.sun.target.position.set(cx, cy, 0);
 
     this.o.onUpdate?.({
       phase: this.phase,
@@ -633,18 +669,26 @@ export class Course {
 
   // ---------------------------------------------------------------- カメラ
 
-  resetCamera(snap) {
+  // 三人称視点：投げる人の右うしろ、少し高い所から、全身とコースの先が見える位置
+  thirdPerson() {
     const yaw = this.yaw * RAD;
-    // 投げる人の右うしろ、少し高い所から、コースの先を見る
-    const back = 3.0, side = 1.5;
-    const pos = new THREE.Vector3(-back * Math.cos(yaw) + side * Math.sin(yaw), -back * Math.sin(yaw) - side * Math.cos(yaw), 2.2);
-    const look = new THREE.Vector3(5 * Math.cos(yaw), 5 * Math.sin(yaw), 0.9);
+    const T = this.thrower.position;
+    const at = (f, l, z) => new THREE.Vector3(
+      T.x + f * Math.cos(yaw) - l * Math.sin(yaw),
+      T.y + f * Math.sin(yaw) + l * Math.cos(yaw),
+      z,
+    );
+    return { pos: at(-3.0, -1.05, 2.15), look: at(3.2, 0.15, 0.95) };
+  }
+
+  resetCamera(snap) {
+    const goal = this.thirdPerson();
     if (snap) {
-      this.camera.position.copy(pos);
-      this.camLook = look.clone();
-      this.camera.lookAt(look);
+      this.camera.position.copy(goal.pos);
+      this.camLook = goal.look.clone();
+      this.camera.lookAt(goal.look);
     }
-    return { pos, look };
+    return goal;
   }
 
   // メインメニューの背景：コースの上をゆっくり回るカメラ（紙飛行機は出さない）
@@ -677,8 +721,15 @@ export class Course {
       return;
     }
     if (this.introT !== undefined && this.introT < 2.5) this.introT += dt;
-    if (['ready', 'power', 'impact', 'throwing'].includes(this.phase)) {
+    // 構え〜投げた直後は三人称視点。「見送る」なら飛んでいる間も投げる人の後ろから見る
+    const watch = this.view === 'thrower';
+    const justThrown = this.phase === 'flying' && this.flightT < 0.45;
+    if (['ready', 'power', 'impact', 'throwing'].includes(this.phase) || justThrown) {
       goal = this.resetCamera(false);
+    } else if (watch) {
+      const p = this.planeOuter.position;
+      const tp = this.thirdPerson();
+      goal = { pos: tp.pos, look: new THREE.Vector3(p.x, p.y, Math.max(0.5, p.z * 0.8)) };
     } else {
       const p = this.planeOuter.position;
       if (this.view === 'side') {

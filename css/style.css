@@ -145,13 +145,6 @@ kbd { font-family: ui-monospace, monospace; font-size: 11px; background: #f2ece2
 .notes li.warn { color: #b0461f; }
 .check { display: flex; align-items: center; gap: 6px; margin-top: 8px; color: var(--muted); }
 
-/* 試し投げ */
-#traj { width: 100%; aspect-ratio: 440 / 300; background: #fff; border: 1px solid var(--line); border-radius: 8px; margin-top: 8px; }
-.val { min-width: 4.5em; text-align: right; font-variant-numeric: tabular-nums; font-size: 12px; color: var(--muted); }
-.field input[type="range"] { flex: 1; }
-.result { margin: 6px 0 0; font-size: 14px; }
-.result b { font-size: 20px; }
-
 /* 飛ばす画面 */
 .fly-only { display: none; }
 body.fly .fly-only { display: inline-block; }
@@ -293,10 +286,28 @@ body.menu #ranking { position: fixed; z-index: 40; top: 50%; left: 50%; right: a
   .brief-card { margin: 0; max-height: 70%; }
 }
 
-/* 切り替え演出：紙の色の幕が左から右へ通り過ぎ、紙飛行機が横切る */
-#wipe { position: fixed; inset: 0; z-index: 50; pointer-events: none; background: #fbf8f1; transform: translateX(-101%); }
-#wipe span { position: absolute; top: 45%; left: 10%; font-size: 64px; color: var(--accent); transform: rotate(-10deg); }
-#wipe.run { animation: wipe 1.3s cubic-bezier(.7,0,.3,1) forwards; }
-#wipe.run span { animation: wipe-plane 1.3s ease-in-out forwards; }
-@keyframes wipe { 0% { transform: translateX(-101%); } 40%, 60% { transform: translateX(0); } 100% { transform: translateX(101%); } }
-@keyframes wipe-plane { 0% { left: -10%; top: 60%; } 50% { left: 45%; top: 42%; } 100% { left: 110%; top: 25%; } }
+/* ローディング画面 */
+#loading { z-index: 45; background: linear-gradient(180deg, #cfe5f3 0%, #eef6fb 55%, #a9cf8a 55.2%, #8dbb6a 100%); transition: opacity .5s; }
+#loading.out { opacity: 0; pointer-events: none; }
+.ld-sky { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.ld-plane { position: absolute; font-size: 54px; color: #fff; text-shadow: 0 3px 10px rgba(0,0,0,.2); animation: ld-fly 5s linear infinite; }
+@keyframes ld-fly {
+  0% { left: -8%; top: 30%; transform: rotate(-8deg); }
+  50% { top: 18%; transform: rotate(4deg); }
+  100% { left: 108%; top: 34%; transform: rotate(-6deg); }
+}
+.ld-box { position: relative; width: 560px; max-width: 100%; text-align: center; }
+.ld-title { font-size: 20px; font-weight: 800; color: #2b3a4a; margin-bottom: 10px; letter-spacing: .05em; }
+.ld-bar { height: 10px; border-radius: 5px; background: rgba(255,255,255,.7); overflow: hidden; box-shadow: inset 0 1px 3px rgba(0,0,0,.12); }
+#ld-fill { height: 100%; width: 0; background: linear-gradient(90deg, #c8402f, #f2a900); }
+.tip-card { margin: 16px 0 14px; padding: 18px 22px 12px; background: rgba(255,253,248,.96); border-radius: 18px; box-shadow: 0 10px 34px rgba(0,0,0,.15); text-align: left; min-height: 210px; display: flex; flex-direction: column; }
+.tip-cat { font-size: 12px; font-weight: 800; color: var(--accent); letter-spacing: .1em; }
+.tip-card h3 { margin: 6px 0 6px; font-size: 20px; }
+.tip-card p { margin: 0; line-height: 1.8; flex: 1; }
+.tip-card.swap { animation: tip-in .35s ease-out; }
+@keyframes tip-in { from { opacity: 0; transform: translateY(6px); } }
+.tip-nav { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; }
+.tip-nav button { padding: 4px 12px; }
+#ld-start { min-width: 220px; }
+#ld-start:disabled { opacity: .6; cursor: default; }
+.field input[type="range"] { flex: 1; }

@@ -13,6 +13,7 @@ import { simulateThrow } from './flight.js';
 import { Course, SWING, speedFromPower } from './course.js';
 import { Records, planeId } from './records.js';
 import { describeWind, randomWind, CALM } from './wind.js';
+import { TIP_CATEGORIES, shuffledTips } from './tips.js';
 
 // ================================================================ 状態
 
@@ -328,7 +329,7 @@ function updateAero() {
   dl.innerHTML = '';
   notes.innerHTML = '';
   aeroMarker.visible = !!a && $('aero-marker').checked;
-  if (!a) { updateThrow(); return; }
+  if (!a) return;
   const rows = [
     ['重さ', `${fmt(a.mass * 1000, 2)} g`],
     ['翼の面積', `${fmt(a.wingArea * 1e4)} cm²`],
@@ -361,106 +362,6 @@ function updateAero() {
   dot.position.copy(cg);
   arrow.position.copy(cg);
   arrow.setDirection(new THREE.Vector3(...a.axes.forward));
-  updateThrow();
-}
-
-// ================================================================ 試し投げ
-
-let lastFlight = null;
-
-function updateThrow() {
-  const speed = +$('throw-speed').value;
-  const angle = +$('throw-angle').value;
-  $('throw-speed-v').textContent = `${speed.toFixed(1)} m/s`;
-  $('throw-angle-v').textContent = `${angle}°`;
-  lastFlight = lastAero ? simulateThrow(lastAero, { speed, angle }) : null;
-  drawTrajectory(lastFlight);
-  const out = $('throw-result');
-  if (!lastFlight) { out.textContent = '紙を折ると、投げたときの飛び方を計算します。'; return; }
-  const f = lastFlight;
-  const side = Math.abs(f.lateral) < 0.05 ? 'まっすぐ' : `${f.lateral > 0 ? '左' : '右'}へ ${Math.abs(f.lateral).toFixed(2)} m`;
-  out.innerHTML = `飛距離 <b>${f.distance.toFixed(2)} m</b>　滞空 ${f.time.toFixed(2)} 秒・最高 ${f.maxHeight.toFixed(2)} m・${side}`;
-}
-
-function drawTrajectory(f) {
-  const cv = $('traj');
-  const ctx = cv.getContext('2d');
-  const W = cv.width;
-  const H = cv.height;
-  ctx.clearRect(0, 0, W, H);
-  const pad = 26;
-  const sideH = H * 0.62; // 横から見た図の高さ
-  // 表示する範囲（最低 10m × 4m）
-  let maxX = 10, maxZ = 4, maxY = 1;
-  if (f) for (const p of f.path) {
-    maxX = Math.max(maxX, p.pos[0] * 1.05);
-    maxZ = Math.max(maxZ, p.pos[2] * 1.1);
-    maxY = Math.max(maxY, Math.abs(p.pos[1]) * 1.1);
-  }
-  const minX = f ? Math.min(0, ...f.path.map((p) => p.pos[0])) : 0;
-  const sx = (W - pad * 1.5) / (maxX - minX);
-  const kz = Math.min(sx, (sideH - pad * 1.2) / maxZ);
-  const X = (x) => pad + (x - minX) * sx;
-  const Zs = (z) => sideH - pad * 0.6 - z * kz;
-  const topMid = sideH + (H - sideH) / 2;
-  const ky = Math.min(sx, (H - sideH - 16) / 2 / maxY);
-  const Yt = (y) => topMid - y * ky;
-
-  ctx.font = '11px system-ui, sans-serif';
-  ctx.fillStyle = '#8a7f73';
-  ctx.strokeStyle = '#eee5d8';
-  ctx.lineWidth = 1;
-  // 1m ごとの目盛り
-  const stepM = maxX > 40 ? 10 : maxX > 20 ? 5 : maxX > 8 ? 2 : 1;
-  for (let m = 0; m <= maxX; m += stepM) {
-    ctx.beginPath(); ctx.moveTo(X(m), 6); ctx.lineTo(X(m), H - 4); ctx.stroke();
-    ctx.fillText(`${m}m`, X(m) + 2, sideH - 6);
-  }
-  // 地面と、上から見た図の中心線
-  ctx.strokeStyle = '#b9ab97';
-  ctx.beginPath(); ctx.moveTo(pad * 0.5, Zs(0)); ctx.lineTo(W - 4, Zs(0)); ctx.stroke();
-  ctx.setLineDash([4, 4]);
-  ctx.beginPath(); ctx.moveTo(pad * 0.5, topMid); ctx.lineTo(W - 4, topMid); ctx.stroke();
-  ctx.setLineDash([]);
-  ctx.beginPath(); ctx.moveTo(0, sideH); ctx.lineTo(W, sideH); ctx.stroke();
-  // 人
-  ctx.fillStyle = '#6b5a4e';
-  ctx.fillRect(X(0) - 2, Zs(1.6), 4, Zs(0) - Zs(1.6));
-  if (!f) return;
-
-  const line = (pick, color) => {
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    f.path.forEach((p, i) => {
-      const [x, y] = pick(p);
-      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-    });
-    ctx.stroke();
-  };
-  line((p) => [X(p.pos[0]), Zs(p.pos[2])], '#1b6fd8');
-  line((p) => [X(p.pos[0]), Yt(p.pos[1])], '#1b6fd8');
-  // 0.25 秒ごとに機首の向きを描く（横から見た図）
-  ctx.strokeStyle = '#e2463f';
-  ctx.lineWidth = 1.5;
-  let next = 0;
-  for (const p of f.path) {
-    if (p.t < next) continue;
-    next += 0.25;
-    const x = X(p.pos[0]);
-    const z = Zs(p.pos[2]);
-    const L = 9;
-    ctx.beginPath();
-    ctx.moveTo(x - Math.cos(p.theta) * L / 2, z + Math.sin(p.theta) * L / 2);
-    ctx.lineTo(x + Math.cos(p.theta) * L / 2, z - Math.sin(p.theta) * L / 2);
-    ctx.stroke();
-  }
-  // 落ちた所
-  const end = f.landing;
-  ctx.fillStyle = '#e2463f';
-  for (const [x, y] of [[X(end[0]), Zs(0)], [X(end[0]), Yt(end[1])]]) {
-    ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill();
-  }
 }
 
 // 解析結果から、飛び方の目安を言葉にする
@@ -1321,6 +1222,7 @@ if (store.get('origami.bgm', false)) {
 syncBgmButtons();
 
 window.addEventListener('keydown', (e) => {
+  if (loading) { loadingKeyDown(e); return; }
   if (e.target.closest('input, select, textarea')) return;
   if (mode === 'menu') {
     if (e.key === 'Escape') { $('howto').hidden = true; $('ranking').hidden = true; $('menu-presets').hidden = true; }
@@ -1639,22 +1541,75 @@ function closeBrief() {
   updateHint();
 }
 
-// 紙飛行機が横切る幕で切り替えて、コースへ
-let wiping = false;
+// ================================================================ ローディング画面（準備画面 → コース）
+
+const LOAD_TIME = 2600; // 読み込みを見せる時間 [ms]
+let loading = null; // { start, ready, tips, i, timer }
+
 function goCourse() {
-  if (wiping) return;
-  wiping = true;
-  const w = $('wipe');
-  w.classList.remove('run');
-  void w.offsetWidth; // アニメーションをやり直す
-  w.classList.add('run');
-  setTimeout(() => {
-    closeBrief();
-    enterFly();
-    course.setWind(briefWind);
-    course.playIntro();
-  }, 560);
-  setTimeout(() => { w.classList.remove('run'); wiping = false; }, 1350);
+  if (loading) return;
+  // 裏でコースを用意しておき、ローディング画面を上にかぶせる
+  closeBrief();
+  enterFly();
+  course.setWind(briefWind);
+  loading = { start: performance.now(), ready: false, tips: shuffledTips(), i: 0, timer: 0 };
+  const el = $('loading');
+  el.classList.remove('out');
+  el.hidden = false;
+  $('ld-title').textContent = 'コースへ移動中…';
+  $('ld-start').disabled = true;
+  $('ld-start').textContent = '読み込み中…';
+  showTip(0);
+  requestAnimationFrame(loadingTick);
+}
+
+function loadingTick() {
+  if (!loading) return;
+  const k = Math.min(1, (performance.now() - loading.start) / LOAD_TIME);
+  // はじめ速く、終わりはゆっくり
+  $('ld-fill').style.width = `${(100 * (1 - (1 - k) ** 2)).toFixed(1)}%`;
+  if (k < 1) { requestAnimationFrame(loadingTick); return; }
+  loading.ready = true;
+  $('ld-title').textContent = '準備ができました！';
+  const b = $('ld-start');
+  b.disabled = false;
+  b.textContent = 'コースへ ▶';
+  b.focus({ preventScroll: true });
+}
+
+function showTip(i) {
+  const n = loading.tips.length;
+  loading.i = (i + n) % n;
+  const t = loading.tips[loading.i];
+  const c = TIP_CATEGORIES[t.cat];
+  $('tip-icon').textContent = c.icon;
+  $('tip-cat').textContent = c.label;
+  $('tip-title').textContent = t.title;
+  $('tip-text').textContent = t.text;
+  $('tip-count').textContent = `${loading.i + 1} / ${n}`;
+  const card = document.querySelector('.tip-card');
+  card.classList.remove('swap');
+  void card.offsetWidth;
+  card.classList.add('swap');
+  // しばらくしたら次のヒントへ（自分で切り替えたら数え直す）
+  clearTimeout(loading.timer);
+  loading.timer = setTimeout(() => loading && showTip(loading.i + 1), 7000);
+}
+
+function finishLoading() {
+  if (!loading || !loading.ready) return;
+  clearTimeout(loading.timer);
+  loading = null;
+  const el = $('loading');
+  el.classList.add('out');
+  setTimeout(() => { el.hidden = true; el.classList.remove('out'); }, 500);
+  course.playIntro();
+}
+
+function loadingKeyDown(e) {
+  if (e.key === 'ArrowRight') { e.preventDefault(); showTip(loading.i + 1); }
+  else if (e.key === 'ArrowLeft') { e.preventDefault(); showTip(loading.i - 1); }
+  else if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); finishLoading(); }
 }
 
 function enterFly() {
@@ -1688,6 +1643,12 @@ function exitFly() {
   resize();
 }
 
+const VIEWS = ['chase', 'thrower', 'side'];
+const VIEW_LABEL = { chase: '🎥 追いかける', thrower: '🎥 見送る', side: '🎥 横から' };
+function nextView() {
+  return VIEWS[(VIEWS.indexOf(course.view) + 1) % VIEWS.length];
+}
+
 function updateFlyStatic() {
   updateWindHud();
   const wb = $('btn-wind');
@@ -1696,7 +1657,8 @@ function updateFlyStatic() {
   $('fly-angle').textContent = `${course.angle}°`;
   const y = course.yaw;
   $('fly-yaw').textContent = y === 0 ? 'まっすぐ' : `${y > 0 ? '左' : '右'} ${Math.abs(y)}°`;
-  $('btn-view-fly').textContent = course.view === 'side' ? '🎥 後ろから' : '🎥 横から';
+  $('btn-view-fly').textContent = VIEW_LABEL[course.view];
+  $('btn-view-fly').title = `カメラ：${VIEW_LABEL[course.view].slice(3)}（C で切り替え）`;
 }
 
 const swingX = (v) => `${(((v - SWING.min) / (1 - SWING.min)) * 100).toFixed(2)}%`;
@@ -1854,7 +1816,7 @@ function flyKeyDown(e) {
   else if (k === 'ArrowDown') { e.preventDefault(); course.setAngle(course.angle - 1); }
   else if (k === 'ArrowLeft') { e.preventDefault(); course.setYaw(course.yaw + 1); }
   else if (k === 'ArrowRight') { e.preventDefault(); course.setYaw(course.yaw - 1); }
-  else if (k.toLowerCase() === 'c') course.setView(course.view === 'side' ? 'chase' : 'side');
+  else if (k.toLowerCase() === 'c') course.setView(nextView());
   else if (k === 'Enter' && course.phase === 'landed') flyAgain();
   else if (k.toLowerCase() === 'r') toggleRanking();
   else if (k.toLowerCase() === 'w') course.setWindEnabled(!course.windEnabled);
@@ -1864,7 +1826,7 @@ function flyKeyDown(e) {
 
 
 $('btn-fly').onclick = toggleFly;
-$('btn-view-fly').onclick = () => { course.setView(course.view === 'side' ? 'chase' : 'side'); updateFlyStatic(); };
+$('btn-view-fly').onclick = () => { course.setView(nextView()); updateFlyStatic(); };
 $('btn-again').onclick = flyAgain;
 $('btn-ranking').onclick = () => toggleRanking();
 $('btn-wind').onclick = () => { course.setWindEnabled(!course.windEnabled); updateFlyStatic(); };
@@ -1907,9 +1869,6 @@ for (const btn of document.querySelectorAll('#fly-controls [data-adj]')) {
 }
 
 $('version').textContent = `v${VERSION}`;
-$('throw-speed').oninput = updateThrow;
-$('throw-angle').oninput = updateThrow;
-updateThrow();
 $('aero-marker').onchange = () => { aeroMarker.visible = !!lastAero && $('aero-marker').checked; };
 updateTextures();
 resize();
@@ -1938,6 +1897,9 @@ $('menu-howto').onclick = () => { $('howto').hidden = false; };
 $('howto-close').onclick = () => { $('howto').hidden = true; };
 $('menu-wind').onclick = () => { course.setWindEnabled(!course.windEnabled); updateMenu(); };
 $('brief-go').onclick = goCourse;
+$('ld-start').onclick = finishLoading;
+$('tip-next').onclick = () => showTip(loading.i + 1);
+$('tip-prev').onclick = () => showTip(loading.i - 1);
 $('brief-back').onclick = closeBrief;
 loop();
 showMenu();
@@ -1947,7 +1909,6 @@ window.__origami = {
   get state() { return state; },
   get busy() { return busy; },
   get aero() { return lastAero; },
-  get flight() { return lastFlight; },
   get mode() { return mode; },
   records,
   course,
@@ -1956,6 +1917,7 @@ window.__origami = {
   showMenu,
   openBrief,
   goCourse,
+  get loading() { return loading; },
   playPreset: (id) => playPreset(PRESETS.find((p) => p.id === id)),
   bgm,
   setView,
