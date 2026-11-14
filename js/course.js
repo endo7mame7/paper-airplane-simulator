@@ -200,6 +200,17 @@ export class Course {
     // 着地点の目印（毎回置く）
     this.markerGroup = new THREE.Group();
     s.add(this.markerGroup);
+
+    // ベスト記録の線
+    this.bestGroup = new THREE.Group();
+    this.bestGroup.visible = false;
+    const bestLine = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.06, 4.4),
+      new THREE.MeshBasicMaterial({ color: 0xffc107 }),
+    );
+    bestLine.position.z = 0.008;
+    this.bestGroup.add(bestLine);
+    s.add(this.bestGroup);
   }
 
   buildThrower() {
@@ -272,6 +283,19 @@ export class Course {
     this.planeInner.matrixWorldNeedsUpdate = true;
     this.clearMarkers();
     this.reset();
+  }
+
+  // ベスト記録の線を引く（distance が null なら消す）
+  setBest(distance, label = 'BEST') {
+    const g = this.bestGroup;
+    if (g.userData.label) { g.remove(g.userData.label); g.userData.label = null; }
+    if (distance === null || distance === undefined) { g.visible = false; return; }
+    const t = groundText(`${label} ${distance.toFixed(2)}m`, 0.32, '#ffc107');
+    t.position.set(0.25, -2.9, 0);
+    g.add(t);
+    g.userData.label = t;
+    g.position.set(distance, 0, 0);
+    g.visible = true;
   }
 
   clearMarkers() {

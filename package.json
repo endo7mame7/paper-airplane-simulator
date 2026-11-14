@@ -1,6 +1,6 @@
 {
   "name": "origami-simulator",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "ブラウザで動く折り紙シミュレーター",
   "type": "module",
   "private": true,
