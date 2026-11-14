@@ -311,3 +311,4 @@ body.menu #ranking { position: fixed; z-index: 40; top: 50%; left: 50%; right: a
 #ld-start { min-width: 220px; }
 #ld-start:disabled { opacity: .6; cursor: default; }
 .field input[type="range"] { flex: 1; }
+#steps li .pair { color: #1b6fd8; font-weight: 700; margin-left: 4px; }

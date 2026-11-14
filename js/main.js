@@ -3,7 +3,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
   createPaper, fold, flip, rotate, makeLine, bisectorLine, sideOf, reflectPoint,
   poseFaces, creasePattern, snapPoints, bounds, cloneState, LAYER_GAP, isFrontUp,
-  reverseFold, addCrease, creaseSegmentsXY, faceAffine, clipToFaceUV,
+  reverseFold, addCrease, pairedSteps, creaseSegmentsXY, faceAffine, clipToFaceUV,
 } from './paper.js';
 import { VERSION } from './version.js';
 import { PRESETS, applyOp } from './presets.js';
@@ -447,7 +447,7 @@ async function flattenAll() {
   const targets = {};
   state.steps.forEach((s, i) => { if (s.angle !== fullAngle(s)) targets[i] = fullAngle(s); });
   if (Object.keys(targets).length) {
-    toast('開いている手順をたたみました');
+    toast('折るために、いったんたたみます');
     await animateAngles(targets, 500);
   }
 }
@@ -486,8 +486,16 @@ function computeFold(line, side, pick) {
   return fold(state, { line, side, type, mode: ui.mode, pick: p });
 }
 
+// 新しく折るときは、線を引いた平らな形で折るために一度たたみ、折ったあとで元の開き具合に戻す
+async function restoreAngles(saved) {
+  const t = {};
+  saved.forEach((a, i) => { if (state.steps[i] && state.steps[i].angle !== a) t[i] = a; });
+  if (Object.keys(t).length) await animateAngles(t, 500);
+}
+
 function doFold(line, side, pick) {
   return runBusy(async () => {
+    const saved = state.steps.map((st) => st.angle);
     await flattenAll();
     if (ui.type === 'crease') {
       // 折ってから開いて、折り筋だけを残す
@@ -504,18 +512,20 @@ function doFold(line, side, pick) {
       state.steps.forEach((st, i) => { st.angle = angles[i]; });
       dirty = true;
       drawCreasePattern();
+      await restoreAngles(saved);
       return;
     }
-    await commit(computeFold(line, side, pick));
+    if (await commit(computeFold(line, side, pick))) await restoreAngles(saved);
   });
 }
 
+// 裏返す・回すは紙全体を動かすだけなので、開いている手順はそのままにする
 function doFlip() {
-  return runBusy(async () => { await flattenAll(); await commit(flip(state)); });
+  return runBusy(async () => { await commit(flip(state)); });
 }
 
 function doRotate() {
-  return runBusy(async () => { await flattenAll(); await commit(rotate(state, 90)); });
+  return runBusy(async () => { await commit(rotate(state, 90)); });
 }
 
 function undo() {
@@ -1078,13 +1088,15 @@ function renderSteps() {
   const ol = $('steps');
   ol.innerHTML = '';
   const groups = stepGroups();
+  const pairs = pairedSteps(state.steps);
   groups.forEach((g, n) => {
     const i = g[0];
     const s = state.steps[i];
     const li = document.createElement('li');
     if (g.includes(currentStep)) li.classList.add('current');
     const { text, cls } = stepLabel(s);
-    li.innerHTML = `<span class="num">${n + 1}</span><span><span class="tag ${cls}"></span>${text}</span>`;
+    const pair = pairs.has(i) ? '<span class="pair" title="左右の対になる手順">⇄</span>' : '';
+    li.innerHTML = `<span class="num">${n + 1}</span><span><span class="tag ${cls}"></span>${text}${pair}</span>`;
     if (s.kind === 'fold' && s.type !== 'flip') {
       const r = document.createElement('input');
       r.type = 'range'; r.min = 0; r.max = 180; r.step = 1; r.value = s.angle;
@@ -1095,6 +1107,11 @@ function renderSteps() {
       r.addEventListener('input', () => {
         if (busy) { r.value = state.steps[i].angle; return; }
         for (const j of g) state.steps[j].angle = +r.value;
+        // 左右の翼は、いっしょに動かす
+        if ($('link-wings').checked && pairs.has(i)) {
+          state.steps[pairs.get(i)].angle = +r.value;
+          syncStepSliders();
+        }
         cancelInput();
         dirty = true;
       });
@@ -1879,6 +1896,8 @@ updateHint();
 
 // メインメニューと準備画面のボタン
 document.body.append($('ranking')); // メニューからも開けるよう、飛ばす画面の外に出す
+$('link-wings').checked = store.get('origami.linkWings', true);
+$('link-wings').onchange = (e) => store.set('origami.linkWings', e.target.checked);
 $('btn-menu').onclick = showMenu;
 $('menu-fold').onclick = leaveMenu;
 $('menu-quick').onclick = () => {

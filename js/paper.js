@@ -775,6 +775,15 @@ function applyStep(step, P, angle) {
   return rotateAboutAxis(P, step.p, step.k, (angle - 180) * DEG);
 }
 
+// 紙全体を動かす手順（裏返す・回す）
+const isRigid = (step) => step.kind === 'rotate' || step.type === 'flip';
+
+// 動かす前の位置 P に、紙全体の動きを角度 angle だけかける
+function applyRigid(step, P, angle) {
+  if (step.kind === 'rotate') return rotateAboutZ(P, step.c, angle * DEG);
+  return rotateAboutAxis(P, step.p, step.k, angle * DEG);
+}
+
 // 平らな状態の座標を、各手順の角度に応じた 3D 座標に変換する
 // angles: 手順ごとの角度（省略時は step.angle）
 export function poseFaces(state, angles) {
@@ -789,14 +798,29 @@ export function poseFaces(state, angles) {
   return state.faces.map((face) => {
     const pts = face.verts.map((v) => {
       let P = [v.x, v.y, 0];
+      // 裏返す・回すは紙全体を動かすので、それより前の手順の折り目もいっしょに動く。
+      // そこで、いったん動かす前の位置に戻してから前の手順を開き、最後に（外側で）動かし直す
+      const outer = [];
       for (let i = face.moves.length - 1; i >= 0; i--) {
         const si = face.moves[i];
         const step = steps[si];
         const a = angles ? angles[si] : step.angle;
         const full = step.kind === 'rotate' ? step.full : 180;
+        if (isRigid(step)) {
+          P = applyStep(step, P, 0); // 動かす前の位置へ
+          outer.push([step, a]);
+          continue;
+        }
         if (a !== full) P = applyStep(step, P, a);
       }
-      P[2] += (face.hist?.[done] ?? face.layer) * LAYER_GAP;
+      // 重なりのすき間は、紙全体を動かす前の向きでつける（裏返すと上下が逆になる）
+      const flips = outer.filter(([st]) => st.type === 'flip' && steps.indexOf(st) < done).length;
+      P[2] += (face.hist?.[done] ?? face.layer) * LAYER_GAP * (flips % 2 ? -1 : 1);
+      // 前の手順から順に、紙全体の動きをかけ直す
+      for (let i = outer.length - 1; i >= 0; i--) {
+        const [step, a] = outer[i];
+        P = applyRigid(step, P, a);
+      }
       return P;
     });
     return { face, pts };
@@ -877,6 +901,27 @@ export function snapPoints(state) {
     }
   }
   return pts;
+}
+
+// 左右の翼のように、同じ折り線で続けて折った「対」の手順を見つける（開き具合を連動させるため）
+// 戻り値: 手順の添字 → 相手の添字 の Map
+export function pairedSteps(steps, tol = 1e-6) {
+  const pairs = new Map();
+  for (let i = 0; i + 1 < steps.length; i++) {
+    const a = steps[i];
+    const b = steps[i + 1];
+    if (pairs.has(i)) continue;
+    if (a.kind !== 'fold' || b.kind !== 'fold' || a.type === 'flip' || b.type === 'flip') continue;
+    if (a.group || b.group) continue; // 中割り折りなどの、もともと一緒に動く手順は別扱い
+    if (a.mode !== 'component' || b.mode !== 'component') continue;
+    // 同じ直線（平行で、b の点が a の線の上）
+    const cross = a.d.x * b.d.y - a.d.y * b.d.x;
+    const off = a.d.x * (b.p.y - a.p.y) - a.d.y * (b.p.x - a.p.x);
+    if (Math.abs(cross) > tol || Math.abs(off) > 1e-4) continue;
+    pairs.set(i, i + 1);
+    pairs.set(i + 1, i);
+  }
+  return pairs;
 }
 
 export function totalArea(state) {
