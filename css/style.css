@@ -356,3 +356,31 @@ body.analysis #panel, body.analysis #quickbar, body.analysis #bottom, body.analy
   .an-side { top: auto; bottom: 230px; max-height: 30%; width: calc(100% - 24px); }
   .an-legend { display: none; }
 }
+
+/* バージョン情報 */
+button.ver.link { background: none; border: 0; padding: 0; color: var(--muted); font-size: 11px; text-decoration: underline dotted; cursor: pointer; }
+button.ver.link:hover { color: var(--accent); }
+#version-info { z-index: 60; background: rgba(20,30,45,.45); }
+.vi-box { width: 640px; max-width: 100%; max-height: calc(100% - 32px); display: flex; flex-direction: column; background: var(--panel); border-radius: 18px; padding: 18px 20px 12px; box-shadow: 0 16px 50px rgba(0,0,0,.3); }
+.vi-head { display: flex; justify-content: space-between; align-items: flex-start; }
+.vi-head h2 { margin: 0; font-size: 20px; }
+.vi-head button { padding: 2px 10px; }
+#vi-list { list-style: none; margin: 12px 0 8px; padding: 0 4px 0 0; overflow-y: auto; flex: 1; }
+#vi-list > li { border-top: 1px solid var(--line); }
+#vi-list details { padding: 9px 2px; }
+#vi-list summary { cursor: pointer; display: grid; grid-template-columns: 5.2em 6.6em 1fr; gap: 8px; align-items: baseline; list-style: none; }
+#vi-list summary::-webkit-details-marker { display: none; }
+#vi-list .v { font-weight: 800; font-variant-numeric: tabular-nums; }
+#vi-list .d { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+#vi-list .s { font-size: 14px; }
+#vi-list .s::after { content: " ▸"; color: var(--muted); }
+#vi-list details[open] .s::after { content: " ▾"; }
+#vi-list .new { display: inline-block; font-size: 10px; font-weight: 800; color: #fff; background: var(--accent); border-radius: 4px; padding: 1px 5px; margin-left: 6px; vertical-align: 1px; }
+#vi-list .origami .v { color: var(--muted); }
+#vi-list ul { margin: 6px 0 2px 13.6em; padding-left: 1.1em; font-size: 13px; line-height: 1.6; }
+#vi-list ul ul { margin: 2px 0 2px 0; font-size: 12px; color: #5d544b; }
+@media (max-width: 640px) {
+  #vi-list summary { grid-template-columns: 4.6em 1fr; }
+  #vi-list .s { grid-column: 1 / -1; }
+  #vi-list ul { margin-left: 0; }
+}

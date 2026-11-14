@@ -6,6 +6,7 @@ import {
   reverseFold, addCrease, pairedSteps, creaseSegmentsXY, faceAffine, clipToFaceUV,
 } from './paper.js';
 import { VERSION } from './version.js';
+import { CHANGELOG } from './changelog.js';
 import { PRESETS, applyOp } from './presets.js';
 import { Bgm } from './bgm.js';
 import { analyzeAirplane } from './aero.js';
@@ -2070,6 +2071,52 @@ for (const btn of document.querySelectorAll('#fly-controls [data-adj]')) {
 }
 
 $('version').textContent = `v${VERSION}`;
+
+// ================================================================ バージョン情報
+
+function showVersionInfo() {
+  const ol = $('vi-list');
+  if (!ol.children.length) {
+    CHANGELOG.forEach((e, i) => {
+      const li = document.createElement('li');
+      if (/折り紙シミュレーター）$/.test(e.summary)) li.className = 'origami';
+      const det = document.createElement('details');
+      if (i === 0) det.open = true;
+      const sum = document.createElement('summary');
+      const v = document.createElement('span'); v.className = 'v'; v.textContent = `v${e.version}`;
+      const d = document.createElement('span'); d.className = 'd'; d.textContent = e.date.replace(/-/g, '/');
+      const t = document.createElement('span'); t.className = 's'; t.textContent = e.summary;
+      if (i === 0) { const n = document.createElement('span'); n.className = 'new'; n.textContent = '最新'; t.append(n); }
+      sum.append(v, d, t);
+      const ul = document.createElement('ul');
+      for (const it of e.items) {
+        const li2 = document.createElement('li');
+        li2.textContent = it.text;
+        if (it.sub.length) {
+          const sub = document.createElement('ul');
+          for (const x of it.sub) { const l = document.createElement('li'); l.textContent = x; sub.append(l); }
+          li2.append(sub);
+        }
+        ul.append(li2);
+      }
+      det.append(sum, ul);
+      li.append(det);
+      ol.append(li);
+    });
+  }
+  $('vi-current').textContent = `紙飛行機シミュレーター v${VERSION}（${CHANGELOG[0].date.replace(/-/g, '/')}）`;
+  $('version-info').hidden = false;
+}
+
+function hideVersionInfo() { $('version-info').hidden = true; }
+
+$('version').onclick = showVersionInfo;
+$('menu-version').onclick = showVersionInfo;
+$('vi-close').onclick = hideVersionInfo;
+$('version-info').addEventListener('click', (e) => { if (e.target.id === 'version-info') hideVersionInfo(); });
+window.addEventListener('keydown', (e) => {
+  if (!$('version-info').hidden && e.key === 'Escape') { e.stopImmediatePropagation(); hideVersionInfo(); }
+}, true);
 $('aero-marker').onchange = () => { aeroMarker.visible = !!lastAero && $('aero-marker').checked; };
 updateTextures();
 resize();

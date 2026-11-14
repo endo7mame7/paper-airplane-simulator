@@ -121,7 +121,7 @@
     <aside id="panel">
       <header>
         <h1>紙飛行機シミュレーター</h1>
-        <p class="sub">線を引いて紙飛行機を折ろう <span id="version" class="ver"></span></p>
+        <p class="sub">線を引いて紙飛行機を折ろう <button id="version" class="ver link" title="バージョン情報と変更履歴"></button></p>
       </header>
 
       <section>
@@ -241,7 +241,7 @@
         <button id="menu-bgm" class="toggle">♪ BGM</button>
         <button id="menu-wind" class="toggle on">🌬 風あり</button>
       </div>
-      <p class="muted small"><span id="menu-version"></span></p>
+      <p class="muted small"><button id="menu-version" class="ver link" title="バージョン情報と変更履歴"></button></p>
     </div>
     <div id="howto" class="menu-panel" hidden>
       <h2>あそびかた</h2>
@@ -275,6 +275,21 @@
         <button id="brief-go" class="primary">コースへ ▶</button>
       </div>
       <p class="muted small">Enter でコースへ / Esc で折り直す</p>
+    </div>
+  </div>
+
+  <!-- バージョン情報 -->
+  <div id="version-info" class="screen" hidden>
+    <div class="vi-box" role="dialog" aria-labelledby="vi-title">
+      <div class="vi-head">
+        <div>
+          <h2 id="vi-title">バージョン情報</h2>
+          <div class="muted small" id="vi-current"></div>
+        </div>
+        <button id="vi-close" title="閉じる (Esc)">✕</button>
+      </div>
+      <ol id="vi-list"></ol>
+      <p class="muted small">日付は日本時間。1.0.0〜1.3.0 は、元にした折り紙シミュレーターの履歴です。</p>
     </div>
   </div>
 
