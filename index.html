@@ -83,6 +83,15 @@
         <label class="check small"><input type="checkbox" id="aero-marker" checked> 重心（●）と機首の向き（→）を表示</label>
       </section>
 
+      <section id="throw">
+        <h2>試し投げ</h2>
+        <label class="field">速さ <input type="range" id="throw-speed" min="2" max="15" step="0.5" value="8"> <span id="throw-speed-v" class="val"></span></label>
+        <label class="field">角度 <input type="range" id="throw-angle" min="-15" max="45" step="1" value="5"> <span id="throw-angle-v" class="val"></span></label>
+        <canvas id="traj" width="440" height="300" aria-label="飛んだ道すじ（横から見た図と上から見た図）"></canvas>
+        <p id="throw-result" class="result"></p>
+        <p class="muted small">上：横から見た図、下：上から見た図。手を離す高さは 1.6 m。</p>
+      </section>
+
       <section>
         <h2>見本</h2>
         <div id="presets" class="row wrap"></div>

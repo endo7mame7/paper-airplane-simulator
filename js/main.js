@@ -9,6 +9,7 @@ import { VERSION } from './version.js';
 import { PRESETS, applyOp } from './presets.js';
 import { Bgm } from './bgm.js';
 import { analyzeAirplane } from './aero.js';
+import { simulateThrow } from './flight.js';
 
 // ================================================================ 状態
 
@@ -324,7 +325,7 @@ function updateAero() {
   dl.innerHTML = '';
   notes.innerHTML = '';
   aeroMarker.visible = !!a && $('aero-marker').checked;
-  if (!a) return;
+  if (!a) { updateThrow(); return; }
   const rows = [
     ['重さ', `${fmt(a.mass * 1000, 2)} g`],
     ['翼の面積', `${fmt(a.wingArea * 1e4)} cm²`],
@@ -357,6 +358,106 @@ function updateAero() {
   dot.position.copy(cg);
   arrow.position.copy(cg);
   arrow.setDirection(new THREE.Vector3(...a.axes.forward));
+  updateThrow();
+}
+
+// ================================================================ 試し投げ
+
+let lastFlight = null;
+
+function updateThrow() {
+  const speed = +$('throw-speed').value;
+  const angle = +$('throw-angle').value;
+  $('throw-speed-v').textContent = `${speed.toFixed(1)} m/s`;
+  $('throw-angle-v').textContent = `${angle}°`;
+  lastFlight = lastAero ? simulateThrow(lastAero, { speed, angle }) : null;
+  drawTrajectory(lastFlight);
+  const out = $('throw-result');
+  if (!lastFlight) { out.textContent = '紙を折ると、投げたときの飛び方を計算します。'; return; }
+  const f = lastFlight;
+  const side = Math.abs(f.lateral) < 0.05 ? 'まっすぐ' : `${f.lateral > 0 ? '左' : '右'}へ ${Math.abs(f.lateral).toFixed(2)} m`;
+  out.innerHTML = `飛距離 <b>${f.distance.toFixed(2)} m</b>　滞空 ${f.time.toFixed(2)} 秒・最高 ${f.maxHeight.toFixed(2)} m・${side}`;
+}
+
+function drawTrajectory(f) {
+  const cv = $('traj');
+  const ctx = cv.getContext('2d');
+  const W = cv.width;
+  const H = cv.height;
+  ctx.clearRect(0, 0, W, H);
+  const pad = 26;
+  const sideH = H * 0.62; // 横から見た図の高さ
+  // 表示する範囲（最低 10m × 4m）
+  let maxX = 10, maxZ = 4, maxY = 1;
+  if (f) for (const p of f.path) {
+    maxX = Math.max(maxX, p.pos[0] * 1.05);
+    maxZ = Math.max(maxZ, p.pos[2] * 1.1);
+    maxY = Math.max(maxY, Math.abs(p.pos[1]) * 1.1);
+  }
+  const minX = f ? Math.min(0, ...f.path.map((p) => p.pos[0])) : 0;
+  const sx = (W - pad * 1.5) / (maxX - minX);
+  const kz = Math.min(sx, (sideH - pad * 1.2) / maxZ);
+  const X = (x) => pad + (x - minX) * sx;
+  const Zs = (z) => sideH - pad * 0.6 - z * kz;
+  const topMid = sideH + (H - sideH) / 2;
+  const ky = Math.min(sx, (H - sideH - 16) / 2 / maxY);
+  const Yt = (y) => topMid - y * ky;
+
+  ctx.font = '11px system-ui, sans-serif';
+  ctx.fillStyle = '#8a7f73';
+  ctx.strokeStyle = '#eee5d8';
+  ctx.lineWidth = 1;
+  // 1m ごとの目盛り
+  const stepM = maxX > 40 ? 10 : maxX > 20 ? 5 : maxX > 8 ? 2 : 1;
+  for (let m = 0; m <= maxX; m += stepM) {
+    ctx.beginPath(); ctx.moveTo(X(m), 6); ctx.lineTo(X(m), H - 4); ctx.stroke();
+    ctx.fillText(`${m}m`, X(m) + 2, sideH - 6);
+  }
+  // 地面と、上から見た図の中心線
+  ctx.strokeStyle = '#b9ab97';
+  ctx.beginPath(); ctx.moveTo(pad * 0.5, Zs(0)); ctx.lineTo(W - 4, Zs(0)); ctx.stroke();
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath(); ctx.moveTo(pad * 0.5, topMid); ctx.lineTo(W - 4, topMid); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.beginPath(); ctx.moveTo(0, sideH); ctx.lineTo(W, sideH); ctx.stroke();
+  // 人
+  ctx.fillStyle = '#6b5a4e';
+  ctx.fillRect(X(0) - 2, Zs(1.6), 4, Zs(0) - Zs(1.6));
+  if (!f) return;
+
+  const line = (pick, color) => {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    f.path.forEach((p, i) => {
+      const [x, y] = pick(p);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  };
+  line((p) => [X(p.pos[0]), Zs(p.pos[2])], '#1b6fd8');
+  line((p) => [X(p.pos[0]), Yt(p.pos[1])], '#1b6fd8');
+  // 0.25 秒ごとに機首の向きを描く（横から見た図）
+  ctx.strokeStyle = '#e2463f';
+  ctx.lineWidth = 1.5;
+  let next = 0;
+  for (const p of f.path) {
+    if (p.t < next) continue;
+    next += 0.25;
+    const x = X(p.pos[0]);
+    const z = Zs(p.pos[2]);
+    const L = 9;
+    ctx.beginPath();
+    ctx.moveTo(x - Math.cos(p.theta) * L / 2, z + Math.sin(p.theta) * L / 2);
+    ctx.lineTo(x + Math.cos(p.theta) * L / 2, z - Math.sin(p.theta) * L / 2);
+    ctx.stroke();
+  }
+  // 落ちた所
+  const end = f.landing;
+  ctx.fillStyle = '#e2463f';
+  for (const [x, y] of [[X(end[0]), Zs(0)], [X(end[0]), Yt(end[1])]]) {
+    ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill();
+  }
 }
 
 // 解析結果から、飛び方の目安を言葉にする
@@ -1349,6 +1450,9 @@ function loop() {
 }
 
 $('version').textContent = `v${VERSION}`;
+$('throw-speed').oninput = updateThrow;
+$('throw-angle').oninput = updateThrow;
+updateThrow();
 $('aero-marker').onchange = () => { aeroMarker.visible = !!lastAero && $('aero-marker').checked; };
 updateTextures();
 resize();
@@ -1363,6 +1467,7 @@ window.__origami = {
   get state() { return state; },
   get busy() { return busy; },
   get aero() { return lastAero; },
+  get flight() { return lastFlight; },
   playPreset: (id) => playPreset(PRESETS.find((p) => p.id === id)),
   bgm,
   setView,

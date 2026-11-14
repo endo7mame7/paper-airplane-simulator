@@ -211,6 +211,44 @@ export function analyzeAirplane(state, options = {}) {
   const mac = planform.mac;
   const staticMargin = mac > 0 ? (0 - planform.xAC) / mac : 0;
 
+  // ---- 翼の面ごとの迎え角のちがい（昇降舵・補助翼のはたらき）
+  // 前のふちが上がっている面ほど迎え角が大きい（正）。平均からのずれが、
+  // 重心より後ろにあれば機首を上げ（ピッチ）、右にあれば右の翼を持ち上げる（ロール）
+  let iW = 0, iSum = 0;
+  const wingFaces = [];
+  for (const f of bodyFaces) {
+    let [nx, ny, nz] = f.nb;
+    if (Math.abs(nz) < opt.liftCos) continue;
+    if (nz < 0) { nx = -nx; ny = -ny; nz = -nz; }
+    const inc = Math.atan2(-nx, Math.hypot(ny, nz));
+    const w = f.area * nz;
+    wingFaces.push({ inc, w, x: f.bc[0], y: f.bc[1] });
+    iSum += inc * w;
+    iW += w;
+  }
+  const incMean = iW > 0 ? iSum / iW : 0;
+  let pitchTrim = 0, rollTrim = 0;
+  for (const f of wingFaces) {
+    pitchTrim += f.w * (f.inc - incMean) * f.x;
+    rollTrim += f.w * (f.inc - incMean) * f.y;
+  }
+  pitchTrim = iW > 0 && mac > 0 ? pitchTrim / (iW * mac) : 0;
+  rollTrim = iW > 0 && planform.span > 0 ? rollTrim / (iW * planform.span) : 0;
+
+  // ---- 慣性モーメント（重心まわり、機体座標）。面の重さを頂点と重心に分けて近似
+  let Ixx = 0, Iyy = 0, Izz = 0;
+  for (const f of bodyFaces) {
+    const ptsW = [f.bc, ...f.bp];
+    const k = f.mass / 2;
+    for (let i = 0; i < ptsW.length; i++) {
+      const [x, y, z] = ptsW[i];
+      const w = i === 0 ? k : k / f.bp.length;
+      Ixx += w * (y * y + z * z);
+      Iyy += w * (x * x + z * z);
+      Izz += w * (x * x + y * y);
+    }
+  }
+
   const S = planform.area * m * m;
   const span = planform.span * m;
   return {
@@ -233,6 +271,10 @@ export function analyzeAirplane(state, options = {}) {
     symmetry: planform.symmetry,           // 平面形の左右対称性（1 なら完全に対称）
     lateralOffset: planform.span > 0 ? planform.yCentroid / planform.span : 0, // 平面形の中心の左右のずれ（翼幅に対する割合。正なら右）
     wingBalance: wingL + wingR > 0 ? (wingR - wingL) / (wingL + wingR) : 0,     // 左右の翼の面積の差（正なら右が大きい）
+    incidence: incMean * DEG,              // 翼の平均の取り付け角 [度]（機体の前後の線に対して）
+    pitchTrim,                             // 昇降舵のききぐあい（正なら機首上げ。揚力傾斜をかけるとピッチモーメント係数）
+    rollTrim,                              // 補助翼のききぐあい（正なら右の翼が持ち上がる）
+    inertia: [Ixx * m * m, Iyy * m * m, Izz * m * m], // 慣性モーメント [kg·m²]（ロール・ピッチ・ヨー）
   };
 }
 
