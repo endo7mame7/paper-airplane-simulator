@@ -14,6 +14,8 @@ import { Course, SWING, speedFromPower } from './course.js';
 import { Records, planeId } from './records.js';
 import { describeWind, randomWind, CALM } from './wind.js';
 import { TIP_CATEGORIES, shuffledTips } from './tips.js';
+import { Analysis, ANALYSIS_NOTE } from './analysis.js';
+import { diagnose } from './airflow.js';
 
 // ================================================================ 状態
 
@@ -1240,6 +1242,7 @@ syncBgmButtons();
 
 window.addEventListener('keydown', (e) => {
   if (loading) { loadingKeyDown(e); return; }
+  if (mode === 'analysis') { analysisKeyDown(e); return; }
   if (e.target.closest('input, select, textarea')) return;
   if (mode === 'menu') {
     if (e.key === 'Escape') { $('howto').hidden = true; $('ranking').hidden = true; $('menu-presets').hidden = true; }
@@ -1347,6 +1350,7 @@ function resize() {
   const r = canvas.getBoundingClientRect();
   renderer.setSize(r.width, r.height, false);
   course.resize(r.width, r.height);
+  analysis?.resize(r.width, r.height);
   const prevAspect = camera.aspect;
   camera.aspect = r.width / Math.max(1, r.height);
   camera.updateProjectionMatrix();
@@ -1367,6 +1371,11 @@ function loop() {
   if (dirty) {
     rebuildGeometry();
     dirty = false;
+  }
+  if (mode === 'analysis') {
+    updateAnalysisFrame(dt);
+    analysis.render();
+    return;
   }
   if (mode === 'fly' || mode === 'menu') {
     course.update(dt);
@@ -1556,6 +1565,180 @@ function closeBrief() {
   controls.autoRotate = false;
   resize();
   updateHint();
+}
+
+// ================================================================ 分析モード（投げたあと）
+
+let analysis = null; // 最初の resize より前に参照されるので、あとで作る
+const an = { t: 0, playing: false, lastBuild: 0, diag: null };
+
+function enterAnalysis() {
+  const f = course.flight;
+  if (!f || course.phase !== 'landed') return;
+  mode = 'analysis';
+  document.body.classList.add('analysis');
+  $('analysis').hidden = false;
+  $('an-note').textContent = ANALYSIS_NOTE;
+  analysis.controls.enabled = true;
+  resize();
+  analysis.setup({ state, aero: course.aero, flight: f, metersPerUnit: course.metersPerUnit });
+  an.diag = diagnose(f, course.aero);
+  renderDiagnosis(an.diag);
+  const slider = $('an-time');
+  slider.max = f.time.toFixed(2);
+  // はじめは、いちばん揚力を使っている（迎え角の大きい）飛行中の瞬間を見せる
+  const mid = f.path.reduce((best, p) => (p.t > 0.2 && p.t < f.time - 0.1 && Math.abs(p.alpha) > Math.abs(best.alpha) && Math.abs(p.alpha) < 0.35 ? p : best), f.path[Math.floor(f.path.length / 3)] ?? f.path[0]);
+  an.t = mid.t;
+  an.playing = false;
+  $('an-play').textContent = '▶';
+  setAnalysisTime(an.t, true);
+}
+
+function exitAnalysis() {
+  mode = 'fly';
+  an.playing = false;
+  document.body.classList.remove('analysis');
+  $('analysis').hidden = true;
+  analysis.controls.enabled = false;
+  resize();
+}
+
+function renderDiagnosis(d) {
+  const ul = $('an-findings');
+  ul.innerHTML = '';
+  for (const f of d.findings) {
+    const li = document.createElement('li');
+    li.className = f.level;
+    const b = document.createElement('b'); b.textContent = f.title;
+    const p = document.createElement('span'); p.textContent = f.text;
+    const fix = document.createElement('span'); fix.className = 'fix'; fix.textContent = f.fix;
+    li.append(b, p, fix);
+    ul.append(li);
+  }
+  const st = d.stats;
+  const dl = $('an-stats');
+  dl.innerHTML = '';
+  for (const [k, v] of [
+    ['飛距離', `${st.distance.toFixed(2)} m`],
+    ['滞空時間', `${st.time.toFixed(2)} 秒`],
+    ['速さ（最高 / 最低）', `${st.maxV.toFixed(1)} / ${st.minV.toFixed(1)} m/s`],
+    ['迎え角（最大）', `${st.maxAlpha.toFixed(1)}°`],
+    ['失速していた時間', `${Math.round(st.stallFraction * 100)} %`],
+    ['揚抗比（平均 / この機体の最高）', `${st.meanLD.toFixed(1)} / ${st.bestLD.toFixed(1)}`],
+  ]) {
+    const dt = document.createElement('dt'); dt.textContent = k;
+    const dd = document.createElement('dd'); dd.textContent = v;
+    dl.append(dt, dd);
+  }
+}
+
+function setAnalysisTime(t, rebuild = false) {
+  const f = course.flight;
+  an.t = Math.max(0, Math.min(f.time, t));
+  $('an-time').value = an.t;
+  // 流れの計算は重いので、再生中は少し間をあけて計算し直す
+  const now = performance.now();
+  if (rebuild || now - an.lastBuild > 250) {
+    analysis.setTime(an.t);
+    an.lastBuild = now;
+  } else {
+    analysis.updateForces(analysis.sample = pathAt(f, an.t));
+  }
+  const p = analysis.sample;
+  const fo = analysis.forces;
+  $('an-readout').innerHTML = `<b>${an.t.toFixed(2)} 秒</b>　速さ <b>${p.V.toFixed(1)}</b> m/s　迎え角 <b>${(p.alpha * 180 / Math.PI).toFixed(1)}°</b>　高さ <b>${p.pos[2].toFixed(2)}</b> m　距離 <b>${Math.hypot(p.pos[0], p.pos[1]).toFixed(1)}</b> m　揚力 / 重さ <b>${(fo.L / fo.W).toFixed(2)}</b>　揚抗比 <b>${fo.LD.toFixed(1)}</b>`;
+  drawAnalysisChart();
+}
+
+function pathAt(f, t) {
+  let p = f.path[0];
+  for (const q of f.path) { if (q.t > t) break; p = q; }
+  return p;
+}
+
+// 下のグラフ：左は横から見た道すじ（失速した所は赤）、右は迎え角の変化（失速角の線つき）
+function drawAnalysisChart() {
+  const cv = $('an-chart');
+  const ctx = cv.getContext('2d');
+  const W = cv.width, H = cv.height;
+  ctx.clearRect(0, 0, W, H);
+  const f = course.flight;
+  const aStall = Math.min(35, 14 + 10 / Math.max(course.aero.aspectRatio, 0.05)); // flight.js と同じ
+  const split = W * 0.6;
+  const pad = 18;
+  // 横から見た道すじ
+  const maxX = Math.max(5, ...f.path.map((p) => Math.hypot(p.pos[0], p.pos[1])));
+  const maxZ = Math.max(2, ...f.path.map((p) => p.pos[2]));
+  const sx = (split - pad * 2) / maxX;
+  const sz = Math.min(sx, (H - pad * 2) / maxZ);
+  const X = (d) => pad + d * sx;
+  const Z = (z) => H - pad - z * sz;
+  ctx.strokeStyle = 'rgba(148,180,220,.35)';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(pad, Z(0)); ctx.lineTo(split - pad, Z(0)); ctx.stroke();
+  ctx.fillStyle = '#9fb4d0';
+  ctx.font = '20px system-ui, sans-serif';
+  ctx.fillText('横から見た道すじ', pad, 20);
+  for (let i = 1; i < f.path.length; i++) {
+    const a = f.path[i - 1], b = f.path[i];
+    ctx.strokeStyle = Math.abs(b.alpha) * 180 / Math.PI > aStall ? '#f87171' : '#60a5fa';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(X(Math.hypot(a.pos[0], a.pos[1])), Z(a.pos[2]));
+    ctx.lineTo(X(Math.hypot(b.pos[0], b.pos[1])), Z(b.pos[2]));
+    ctx.stroke();
+  }
+  const cur = pathAt(f, an.t);
+  ctx.fillStyle = '#fbbf24';
+  ctx.beginPath(); ctx.arc(X(Math.hypot(cur.pos[0], cur.pos[1])), Z(cur.pos[2]), 6, 0, Math.PI * 2); ctx.fill();
+  // 迎え角の変化
+  const x0 = split + pad, x1 = W - pad;
+  const T = Math.max(f.time, 0.1);
+  const aMax = Math.max(aStall + 5, ...f.path.map((p) => Math.abs(p.alpha) * 180 / Math.PI));
+  const tx = (t) => x0 + (t / T) * (x1 - x0);
+  const ay = (a) => H / 2 + 10 - (a / aMax) * (H / 2 - 22);
+  ctx.fillStyle = 'rgba(248,113,113,.15)';
+  ctx.fillRect(x0, ay(aMax), x1 - x0, ay(aStall) - ay(aMax));
+  ctx.fillRect(x0, ay(-aStall), x1 - x0, ay(-aMax) - ay(-aStall));
+  ctx.strokeStyle = 'rgba(148,180,220,.35)';
+  ctx.beginPath(); ctx.moveTo(x0, ay(0)); ctx.lineTo(x1, ay(0)); ctx.stroke();
+  ctx.fillStyle = '#9fb4d0';
+  ctx.fillText('迎え角（赤い帯 = 失速）', x0, 20);
+  ctx.strokeStyle = '#a78bfa';
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  f.path.forEach((p, i) => {
+    const x = tx(p.t), y = ay(p.alpha * 180 / Math.PI);
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+  ctx.strokeStyle = '#fbbf24';
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(tx(an.t), 26); ctx.lineTo(tx(an.t), H - 4); ctx.stroke();
+}
+
+function updateAnalysisFrame(dt) {
+  analysis.update(dt);
+  if (an.playing) {
+    const f = course.flight;
+    let t = an.t + dt * 0.5; // 半分の速さで再生
+    if (t >= f.time) { t = f.time; an.playing = false; $('an-play').textContent = '▶'; }
+    setAnalysisTime(t);
+  }
+}
+
+function toggleAnalysisPlay() {
+  if (!an.playing && an.t >= course.flight.time - 1e-3) an.t = 0;
+  an.playing = !an.playing;
+  $('an-play').textContent = an.playing ? '❚❚' : '▶';
+  if (!an.playing) setAnalysisTime(an.t, true);
+}
+
+function analysisKeyDown(e) {
+  if (e.key === 'Escape') exitAnalysis();
+  else if (e.key === ' ') { e.preventDefault(); toggleAnalysisPlay(); }
+  else if (e.key === 'ArrowRight') { e.preventDefault(); setAnalysisTime(an.t + 0.1, true); }
+  else if (e.key === 'ArrowLeft') { e.preventDefault(); setAnalysisTime(an.t - 0.1, true); }
 }
 
 // ================================================================ ローディング画面（準備画面 → コース）
@@ -1835,6 +2018,7 @@ function flyKeyDown(e) {
   else if (k === 'ArrowRight') { e.preventDefault(); course.setYaw(course.yaw - 1); }
   else if (k.toLowerCase() === 'c') course.setView(nextView());
   else if (k === 'Enter' && course.phase === 'landed') flyAgain();
+  else if (k.toLowerCase() === 'a' && course.phase === 'landed') enterAnalysis();
   else if (k.toLowerCase() === 'r') toggleRanking();
   else if (k.toLowerCase() === 'w') course.setWindEnabled(!course.windEnabled);
   else if (k === 'Escape') { if (!$('ranking').hidden) toggleRanking(false); else exitFly(); }
@@ -1898,6 +2082,18 @@ updateHint();
 document.body.append($('ranking')); // メニューからも開けるよう、飛ばす画面の外に出す
 $('link-wings').checked = store.get('origami.linkWings', true);
 $('link-wings').onchange = (e) => store.set('origami.linkWings', e.target.checked);
+analysis = new Analysis({ renderer, canvas });
+resize();
+$('btn-analyze').onclick = enterAnalysis;
+$('an-back').onclick = exitAnalysis;
+$('an-again').onclick = () => { exitAnalysis(); flyAgain(); };
+$('an-refold').onclick = () => { exitAnalysis(); exitFly(); };
+$('an-play').onclick = toggleAnalysisPlay;
+$('an-time').oninput = (e) => { an.playing = false; $('an-play').textContent = '▶'; setAnalysisTime(+e.target.value); };
+$('an-time').onchange = (e) => setAnalysisTime(+e.target.value, true);
+for (const cb of document.querySelectorAll('#analysis [data-show]')) {
+  cb.onchange = () => analysis.setShow(cb.dataset.show, cb.checked);
+}
 $('btn-menu').onclick = showMenu;
 $('menu-fold').onclick = leaveMenu;
 $('menu-quick').onclick = () => {
@@ -1937,6 +2133,8 @@ window.__origami = {
   openBrief,
   goCourse,
   get loading() { return loading; },
+  enterAnalysis,
+  get analysis() { return analysis; },
   playPreset: (id) => playPreset(PRESETS.find((p) => p.id === id)),
   bgm,
   setView,

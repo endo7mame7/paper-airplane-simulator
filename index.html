@@ -73,6 +73,7 @@
           <div id="fly-result-sub" class="small"></div>
           <div class="row">
             <button id="btn-again" class="primary">もう一度投げる</button>
+            <button id="btn-analyze" title="空気の流れと飛び方を分析する (A)">🔬 分析</button>
             <button id="btn-refold-plane">折り直す</button>
           </div>
         </div>
@@ -274,6 +275,50 @@
         <button id="brief-go" class="primary">コースへ ▶</button>
       </div>
       <p class="muted small">Enter でコースへ / Esc で折り直す</p>
+    </div>
+  </div>
+
+  <!-- 分析モード -->
+  <div id="analysis" hidden>
+    <div class="an-top">
+      <div>
+        <div class="an-title">🔬 分析モード</div>
+        <div class="an-note" id="an-note"></div>
+      </div>
+      <div class="an-btns">
+        <button id="an-back" title="結果に戻る (Esc)">← 結果に戻る</button>
+        <button id="an-again" class="primary">もう一度投げる</button>
+        <button id="an-refold">✎ 折り直す</button>
+      </div>
+    </div>
+    <aside class="an-side">
+      <h3>診断</h3>
+      <ul id="an-findings"></ul>
+      <h3>この 1 投</h3>
+      <dl id="an-stats" class="stats"></dl>
+    </aside>
+    <div class="an-legend">
+      <div class="an-toggles">
+        <label><input type="checkbox" data-show="flow" checked> 流れ</label>
+        <label><input type="checkbox" data-show="vortex" checked> 翼端うず</label>
+        <label><input type="checkbox" data-show="pressure" checked> 翼の圧力</label>
+        <label><input type="checkbox" data-show="forces" checked> 力の矢印</label>
+      </div>
+      <div class="bar-title">流れの速さ（周りの空気に対して）</div>
+      <div class="cbar speed"></div>
+      <div class="cbar-l"><span>遅い</span><span>同じ</span><span>速い</span></div>
+      <div class="bar-title">翼の圧力</div>
+      <div class="cbar press"></div>
+      <div class="cbar-l"><span>低い（吸い上げ）</span><span>高い（押し上げ）</span></div>
+      <p class="small an-hint">ドラッグで回す・ホイールで拡大</p>
+    </div>
+    <div class="an-bottom">
+      <div class="an-readout" id="an-readout"></div>
+      <div class="an-timeline">
+        <button id="an-play" title="再生 / 一時停止 (Space)">▶</button>
+        <input type="range" id="an-time" min="0" max="1" step="0.01" value="0">
+      </div>
+      <canvas id="an-chart" width="900" height="150"></canvas>
     </div>
   </div>
 

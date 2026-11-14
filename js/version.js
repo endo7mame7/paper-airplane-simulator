@@ -1,2 +1,2 @@
 // アプリのバージョン（変更内容は CHANGELOG.md）
-export const VERSION = '1.10.1';
+export const VERSION = '1.11.0';

@@ -269,6 +269,8 @@ export function analyzeAirplane(state, options = {}) {
     staticMargin,                          // 静安定余裕（平均翼弦に対する割合。正なら安定）
     dihedral: dihW > 0 ? dihSum / dihW : 0, // 上反角 [度]
     symmetry: planform.symmetry,           // 平面形の左右対称性（1 なら完全に対称）
+    // 翼幅方向の帯ごとの翼弦（機体座標、重心が原点、x 前・y 右、単位 m）。流れの可視化に使う
+    strips: (planform.strips ?? []).map((t) => ({ y: t.y * m, lead: t.lead * m, trail: t.trail * m, c: t.c * m, w: t.w * m })),
     lateralOffset: planform.span > 0 ? planform.yCentroid / planform.span : 0, // 平面形の中心の左右のずれ（翼幅に対する割合。正なら右）
     wingBalance: wingL + wingR > 0 ? (wingR - wingL) / (wingL + wingR) : 0,     // 左右の翼の面積の差（正なら右が大きい）
     incidence: incMean * DEG,              // 翼の平均の取り付け角 [度]（機体の前後の線に対して）
@@ -437,6 +439,7 @@ function analyzePlanform(plan) {
   let xNose = -Infinity, xTail = Infinity;
   let yMin = Infinity, yMax = -Infinity;
   // 翼弦方向（x）ごとではなく、翼幅方向（y）の列ごとに翼弦を測る
+  const strips = [];
   let sumC = 0, sumC2 = 0, sumAC = 0;
   let rootChord = 0, rootDist = Infinity;
   for (let j = 0; j < ny; j++) {
@@ -461,6 +464,7 @@ function analyzePlanform(plan) {
     sumC2 += c * c * h;
     sumAC += (lead - 0.25 * (lead - trail)) * c * h; // 前から 1/4 の点を翼弦で重み付け
     if (Math.abs(y) < rootDist) { rootDist = Math.abs(y); rootChord = c; }
+    strips.push({ y, lead, trail, c, w: h });
   }
   if (!count) return empty;
   const area = count * cell;
@@ -482,6 +486,7 @@ function analyzePlanform(plan) {
     mac: sumC > 0 ? sumC2 / sumC : 0,
     xAC: sumC > 0 ? sumAC / sumC : 0,
     xNose,
+    strips,
     yCentroid: sumY / count,
     symmetry: same / count,
   };
