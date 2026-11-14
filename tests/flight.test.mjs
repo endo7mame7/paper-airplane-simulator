@@ -81,3 +81,21 @@ test('軌跡は時刻順で、最後の点は地面', () => {
   assert.equal(r.path[r.path.length - 1].pos[2], 0);
   assert.equal(r.path[0].pos[2], 1.6);
 });
+
+test('投げるタイミング：ジャストなら狙いどおり、外れるほどずれて弱くなる', async () => {
+  const { swingResult, speedFromPower, SWING } = await import('../js/swing.js');
+  const just = swingResult(0.8, 0);
+  assert.equal(just.grade, 'just');
+  assert.equal(just.yawErr, 0);
+  assert.ok(just.speed > speedFromPower(0.8));
+  const early = swingResult(0.8, 0.06);
+  assert.equal(early.grade, 'good');
+  assert.ok(early.yawErr > 0 && early.bankErr < 0);
+  const late = swingResult(0.8, -0.12);
+  assert.equal(late.grade, 'late');
+  assert.ok(late.yawErr < 0 && late.speed < early.speed);
+  const miss = swingResult(0.8, null);
+  assert.equal(miss.grade, 'miss');
+  assert.ok(miss.speed < late.speed + 1e-9);
+  assert.ok(SWING.just < SWING.good);
+});

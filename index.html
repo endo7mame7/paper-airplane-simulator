@@ -41,10 +41,78 @@
           </div>
         </div>
       </div>
+      <div id="fly-hud" hidden>
+        <div id="fly-top">
+          <div id="fly-dist">0.00<small> m</small></div>
+          <div id="fly-sub" class="small"></div>
+        </div>
+        <div id="fly-grade"></div>
+        <div id="fly-wind" title="風（矢印は風が吹いていく向き。上が投げる方向）">
+          <div id="wind-arrow"><span>➤</span></div>
+          <div id="wind-text"></div>
+        </div>
+        <div id="fly-best">
+          <div id="fly-best-all"></div>
+          <div id="fly-best-plane"></div>
+          <button id="btn-ranking" title="ランキング (R)">🏆 ランキング</button>
+        </div>
+        <div id="ranking" hidden>
+          <div class="rk-head">
+            <h2>🏆 ランキング</h2>
+            <button id="btn-ranking-close" title="閉じる (Esc)">✕</button>
+          </div>
+          <label class="field">名前 <input id="player-name" maxlength="16" placeholder="ななし"></label>
+          <ol id="ranking-list"></ol>
+          <p id="ranking-stats" class="muted small"></p>
+          <div class="row"><button id="btn-ranking-clear" class="danger">記録をすべて消す</button></div>
+          <p class="muted small">記録はこのブラウザの中だけに保存されます。</p>
+        </div>
+        <div id="fly-result" hidden>
+          <div class="label">飛距離</div>
+          <div id="fly-result-dist" class="big"></div>
+          <div id="fly-result-rank" class="rank"></div>
+          <div id="fly-result-grade" class="grade"></div>
+          <div id="fly-result-sub" class="small"></div>
+          <div class="row">
+            <button id="btn-again" class="primary">もう一度投げる</button>
+            <button id="btn-refold-plane">折り直す</button>
+          </div>
+        </div>
+        <div id="fly-controls">
+          <div class="ctl">
+            <span class="ctl-label">角度</span>
+            <button data-adj="angle" data-d="-1" title="下へ (↓)">▼</button>
+            <span id="fly-angle" class="ctl-val"></span>
+            <button data-adj="angle" data-d="1" title="上へ (↑)">▲</button>
+          </div>
+          <div class="ctl">
+            <span class="ctl-label">向き</span>
+            <button data-adj="yaw" data-d="1" title="左へ (←)">◀</button>
+            <span id="fly-yaw" class="ctl-val"></span>
+            <button data-adj="yaw" data-d="-1" title="右へ (→)">▶</button>
+          </div>
+          <div id="swing" aria-label="スイングメーター">
+            <div id="swing-bar">
+              <div id="swing-fill"></div>
+              <div id="swing-just"></div>
+              <div class="swing-tick" style="--v:.25"></div>
+              <div class="swing-tick" style="--v:.5"></div>
+              <div class="swing-tick" style="--v:.75"></div>
+              <div id="swing-power"></div>
+              <div id="swing-cursor"></div>
+            </div>
+            <div id="swing-labels"><span>ジャスト</span><span id="fly-speed"></span><span>強さ 100%</span></div>
+          </div>
+          <button id="btn-throw" class="primary" title="1 回目：振りかぶる / 2 回目：強さを決める / 3 回目：ジャストで投げる (Space)">振りかぶる</button>
+        </div>
+      </div>
       <div id="quickbar">
         <button id="btn-undo" title="元に戻す (Ctrl+Z)">↶ 戻す</button>
         <button id="btn-redo" title="やり直す (Ctrl+Y)">↷ やり直す</button>
         <button id="btn-orbit" class="toggle" title="左ドラッグで視点を回す">⟲ 視点</button>
+        <button id="btn-fly" class="mode" title="コースで飛ばす / 折る画面に戻る (Tab)">✈ 飛ばす</button>
+        <button id="btn-view-fly" class="fly-only" title="カメラを切り替える (C)">🎥 横から</button>
+        <button id="btn-wind" class="fly-only toggle on" title="風のあり・なし (W)">🌬 風あり</button>
         <button id="btn-bgm" class="toggle" title="BGM のオン・オフ (B)" aria-pressed="false">♪</button>
         <button id="btn-panel" class="only-mobile" title="メニュー">☰</button>
       </div>
