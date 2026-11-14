@@ -10,6 +10,7 @@ import { PRESETS, applyOp } from './presets.js';
 import { Bgm } from './bgm.js';
 import { analyzeAirplane } from './aero.js';
 import { simulateThrow } from './flight.js';
+import { Course, SWING, speedFromPower } from './course.js';
 
 // ================================================================ 状態
 
@@ -832,6 +833,7 @@ function anyPartial() {
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
 canvas.addEventListener('pointerdown', (ev) => {
+  if (mode === 'fly') { ev.preventDefault(); flyPress(ev); return; } // 画面をタップしても投げられる
   input.pointers.add(ev.pointerId);
   if (input.pointers.size > 1) { // 2 本指は視点操作
     if (input.phase === 'drawing') cancelInput();
@@ -860,6 +862,7 @@ canvas.addEventListener('pointerdown', (ev) => {
 });
 
 canvas.addEventListener('pointermove', (ev) => {
+  if (mode === 'fly') return;
   if (busy || ui.orbit) { snapRing.visible = false; return; }
   const raw = pointerToPaper(ev);
   if (!raw) return;
@@ -897,6 +900,7 @@ function endPointer(ev) {
 }
 
 canvas.addEventListener('pointerup', (ev) => {
+  if (mode === 'fly') return;
   const wasDown = input.downAt;
   const isClick = wasDown && !moved(ev);
   endPointer(ev);
@@ -1325,6 +1329,8 @@ syncBgmButtons();
 
 window.addEventListener('keydown', (e) => {
   if (e.target.closest('input, select, textarea')) return;
+  if (e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); toggleFly(); return; }
+  if (mode === 'fly') { flyKeyDown(e); return; }
   const k = e.key.toLowerCase();
   if ((e.ctrlKey || e.metaKey) && k === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); return; }
   if ((e.ctrlKey || e.metaKey) && k === 'y') { e.preventDefault(); redo(); return; }
@@ -1421,6 +1427,7 @@ function drawCreasePattern() {
 function resize() {
   const r = canvas.getBoundingClientRect();
   renderer.setSize(r.width, r.height, false);
+  course.resize(r.width, r.height);
   const prevAspect = camera.aspect;
   camera.aspect = r.width / Math.max(1, r.height);
   camera.updateProjectionMatrix();
@@ -1432,8 +1439,21 @@ function resize() {
 }
 window.addEventListener('resize', resize);
 
+let lastFrame = performance.now();
 function loop() {
   requestAnimationFrame(loop);
+  const now = performance.now();
+  const dt = (now - lastFrame) / 1000;
+  lastFrame = now;
+  if (dirty) {
+    rebuildGeometry();
+    dirty = false;
+  }
+  if (mode === 'fly') {
+    course.update(dt);
+    course.render();
+    return;
+  }
   // 注視点をゆっくり紙の中心へ
   const d = targetGoal.clone().sub(controls.target);
   if (d.lengthSq() > 1e-8 && input.phase === 'idle') {
@@ -1442,11 +1462,156 @@ function loop() {
     camera.position.add(d);
   }
   controls.update();
-  if (dirty) {
-    rebuildGeometry();
-    dirty = false;
-  }
   renderer.render(scene, camera);
+}
+
+// ================================================================ 飛ばす画面
+
+let mode = 'fold'; // 'fold' | 'fly'
+const course = new Course({
+  renderer, paperGeom, edgeGeom, frontMat, backMat,
+  onLanded: (f) => showFlyResult(f),
+  onUpdate: (info) => updateFlyHud(info),
+  onSwing: (sw) => showGrade(sw),
+});
+
+const GRADE_TEXT = { just: 'ジャスト！', good: 'ナイス', early: '早い！', late: '遅い！', miss: 'ミス…' };
+let gradeTimer = 0;
+function showGrade(sw) {
+  const el = $('fly-grade');
+  el.textContent = GRADE_TEXT[sw.grade];
+  el.className = `show ${sw.grade}`;
+  clearTimeout(gradeTimer);
+  gradeTimer = setTimeout(() => { el.className = sw.grade; }, 1100);
+}
+
+function toggleFly() {
+  if (mode === 'fold') enterFly(); else exitFly();
+}
+
+function enterFly() {
+  if (busy) { toast('折り終わるまで待ってください'); return; }
+  if (input.phase !== 'idle') cancelInput();
+  if (dirty) { rebuildGeometry(); dirty = false; }
+  const m = PAPER_METERS[ui.shape] ?? 0.075;
+  const a = analyzeAirplane(state, { metersPerUnit: m });
+  if (!a) { toast('紙がありません'); return; }
+  course.setAirplane(a, m);
+  mode = 'fly';
+  document.body.classList.add('fly');
+  $('fly-hud').hidden = false;
+  $('fly-result').hidden = true;
+  $('btn-fly').textContent = '✎ 折る';
+  controls.enabled = false;
+  snapRing.visible = false;
+  resize(); // 右のパネルを隠したので、3D を画面いっぱいに
+  updateFlyStatic();
+}
+
+function exitFly() {
+  mode = 'fold';
+  document.body.classList.remove('fly');
+  $('fly-hud').hidden = true;
+  $('btn-fly').textContent = '✈ 飛ばす';
+  controls.enabled = true;
+  resize();
+}
+
+function updateFlyStatic() {
+  $('fly-angle').textContent = `${course.angle}°`;
+  const y = course.yaw;
+  $('fly-yaw').textContent = y === 0 ? 'まっすぐ' : `${y > 0 ? '左' : '右'} ${Math.abs(y)}°`;
+  $('btn-view-fly').textContent = course.view === 'side' ? '🎥 後ろから' : '🎥 横から';
+}
+
+const swingX = (v) => `${(((v - SWING.min) / (1 - SWING.min)) * 100).toFixed(2)}%`;
+const THROW_LABEL = { ready: '振りかぶる', power: '強さを決める', impact: '投げる！', throwing: 'スキップ', flying: 'スキップ', landed: '振りかぶる' };
+
+function updateFlyHud(info) {
+  // スイングメーター
+  const zero = (0 - SWING.min) / (1 - SWING.min);
+  const v = info.phase === 'ready' ? 0 : info.cursor;
+  $('swing-cursor').style.left = swingX(v);
+  const pw = info.phase === 'power' ? info.cursor : info.power ?? 0;
+  $('swing-fill').style.width = `${(pw * (1 - zero) * 100).toFixed(2)}%`;
+  const pm = $('swing-power');
+  pm.style.display = info.power !== null && info.phase !== 'ready' ? 'block' : 'none';
+  if (info.power !== null) pm.style.left = swingX(info.power);
+  const sp = info.flight?.speed ?? (info.phase === 'power' || info.phase === 'impact' ? speedFromPower(pw) : null);
+  $('fly-speed').textContent = sp ? `${sp.toFixed(1)} m/s` : '';
+  $('btn-throw').textContent = THROW_LABEL[info.phase] ?? '振りかぶる';
+  const flying = info.phase === 'flying' || info.phase === 'landed';
+  $('fly-dist').firstChild.textContent = (flying ? info.distance : 0).toFixed(2);
+  $('fly-sub').textContent = info.phase === 'flying'
+    ? `${info.t.toFixed(1)} 秒・高さ ${info.height.toFixed(2)} m（Space で飛ばす）`
+    : info.phase === 'ready' ? 'ボタン（Space）を 3 回：振りかぶる → 強さを決める → ジャストで投げる'
+      : info.phase === 'power' ? 'ほしい強さのところで押す'
+        : info.phase === 'impact' ? '白い「ジャスト」のところで押す！' : '';
+
+}
+
+function showFlyResult(f) {
+  $('fly-result-dist').textContent = `${f.distance.toFixed(2)} m`;
+  const sw = f.swing;
+  $('fly-result-grade').textContent = sw ? `${GRADE_TEXT[sw.grade]}　強さ ${Math.round(sw.power * 100)}%` : '';
+  const side = Math.abs(f.lateral) < 0.05 ? 'まっすぐ' : `${f.lateral > 0 ? '左' : '右'}へ ${Math.abs(f.lateral).toFixed(2)} m`;
+  $('fly-result-sub').textContent = `${f.speed.toFixed(1)} m/s・${Math.round(f.angle)}°で投げて、滞空 ${f.time.toFixed(2)} 秒・${side}`;
+  $('fly-result').hidden = false;
+}
+
+function flyAgain() {
+  $('fly-result').hidden = true;
+  course.reset();
+}
+
+function flyPress(e) {
+  $('fly-result').hidden = true;
+  course.press(e?.timeStamp ?? performance.now());
+}
+
+function flyKeyDown(e) {
+  const k = e.key;
+  if (k === ' ') {
+    e.preventDefault();
+    if (e.repeat) return;
+    flyPress(e);
+  } else if (k === 'ArrowUp') { e.preventDefault(); course.setAngle(course.angle + 1); }
+  else if (k === 'ArrowDown') { e.preventDefault(); course.setAngle(course.angle - 1); }
+  else if (k === 'ArrowLeft') { e.preventDefault(); course.setYaw(course.yaw + 1); }
+  else if (k === 'ArrowRight') { e.preventDefault(); course.setYaw(course.yaw - 1); }
+  else if (k.toLowerCase() === 'c') course.setView(course.view === 'side' ? 'chase' : 'side');
+  else if (k === 'Enter' && course.phase === 'landed') flyAgain();
+  else if (k === 'Escape') exitFly();
+  updateFlyStatic();
+}
+
+
+$('btn-fly').onclick = toggleFly;
+$('btn-view-fly').onclick = () => { course.setView(course.view === 'side' ? 'chase' : 'side'); updateFlyStatic(); };
+$('btn-again').onclick = flyAgain;
+$('btn-refold-plane').onclick = exitFly;
+{
+  const b = $('btn-throw');
+  // 押した瞬間に反応させる（click だと離したときになり、タイミングがずれる）
+  b.addEventListener('pointerdown', (e) => { e.preventDefault(); flyPress(e); });
+}
+// 角度・向きのボタン（押し続けると連続で変わる）
+for (const btn of document.querySelectorAll('#fly-controls [data-adj]')) {
+  let timer = 0;
+  const apply = () => {
+    const d = +btn.dataset.d;
+    if (btn.dataset.adj === 'angle') course.setAngle(course.angle + d);
+    else course.setYaw(course.yaw + d);
+    updateFlyStatic();
+  };
+  const stop = () => { clearTimeout(timer); clearInterval(timer); };
+  btn.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    apply();
+    stop();
+    timer = setTimeout(() => { timer = setInterval(apply, 60); }, 350);
+  });
+  for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) btn.addEventListener(ev, stop);
 }
 
 $('version').textContent = `v${VERSION}`;
@@ -1468,6 +1633,10 @@ window.__origami = {
   get busy() { return busy; },
   get aero() { return lastAero; },
   get flight() { return lastFlight; },
+  get mode() { return mode; },
+  course,
+  enterFly,
+  exitFly,
   playPreset: (id) => playPreset(PRESETS.find((p) => p.id === id)),
   bgm,
   setView,
