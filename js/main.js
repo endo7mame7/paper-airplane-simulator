@@ -8,6 +8,7 @@ import {
 import { VERSION } from './version.js';
 import { PRESETS, applyOp } from './presets.js';
 import { Bgm } from './bgm.js';
+import { analyzeAirplane } from './aero.js';
 
 // ================================================================ 状態
 
@@ -284,7 +285,97 @@ function rebuildGeometry() {
   markGeom.computeBoundingSphere();
   lastPoseMinZ = minZ;
   ground.position.z = Math.min(0, minZ) - 0.02;
+  scheduleAero();
 }
+
+// ================================================================ 飛行機としての性能
+
+// 紙の実寸（シミュレーター単位 1 あたりの m）。正方形は 15cm、A4 は長い辺 29.7cm
+const PAPER_METERS = { square: 0.15 / 2, a4: 0.297 / 2, strip: 0.15 / 2 };
+
+const aeroMarker = new THREE.Group();
+{
+  const dot = new THREE.Mesh(
+    new THREE.SphereGeometry(0.035, 16, 12),
+    new THREE.MeshBasicMaterial({ color: 0x1b6fd8, depthTest: false }),
+  );
+  dot.renderOrder = 10;
+  const arrow = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(), 0.5, 0x1b6fd8, 0.12, 0.07);
+  arrow.traverse((o) => { if (o.material) { o.material.depthTest = false; o.renderOrder = 10; } });
+  aeroMarker.add(dot, arrow);
+  aeroMarker.userData = { dot, arrow };
+}
+scene.add(aeroMarker);
+
+let aeroTimer = 0;
+let lastAero = null;
+function scheduleAero() {
+  clearTimeout(aeroTimer);
+  aeroTimer = setTimeout(updateAero, 120);
+}
+
+const fmt = (v, d = 1) => (Number.isFinite(v) ? v.toFixed(d) : '—');
+
+function updateAero() {
+  const a = state.steps.length ? analyzeAirplane(state, { metersPerUnit: PAPER_METERS[ui.shape] ?? 0.075 }) : null;
+  lastAero = a;
+  const dl = $('aero-stats');
+  const notes = $('aero-notes');
+  dl.innerHTML = '';
+  notes.innerHTML = '';
+  aeroMarker.visible = !!a && $('aero-marker').checked;
+  if (!a) return;
+  const rows = [
+    ['重さ', `${fmt(a.mass * 1000, 2)} g`],
+    ['翼の面積', `${fmt(a.wingArea * 1e4)} cm²`],
+    ['翼幅 × 全長', `${fmt(a.span * 100)} × ${fmt(a.length * 100)} cm`],
+    ['縦横比（アスペクト比）', fmt(a.aspectRatio, 2)],
+    ['翼面荷重', `${fmt(a.wingLoading, 2)} N/m²`],
+    ['機首から重心', `${fmt(a.cgFromNose * 100)} cm`],
+    ['機首から空力中心', `${fmt(a.acFromNose * 100)} cm`],
+    ['静安定余裕', `${fmt(a.staticMargin * 100, 0)} %`],
+    ['上反角', `${fmt(a.dihedral)}°`],
+    ['胴（キール）の面積', `${fmt(a.sideArea * 1e4)} cm²`],
+    ['左右の対称性', `${fmt(a.symmetry * 100, 0)} %`],
+  ];
+  for (const [k, v] of rows) {
+    const dt = document.createElement('dt');
+    dt.textContent = k;
+    const dd = document.createElement('dd');
+    dd.textContent = v;
+    dl.append(dt, dd);
+  }
+  for (const [cls, text] of aeroNotes(a)) {
+    const li = document.createElement('li');
+    li.className = cls;
+    li.textContent = text;
+    notes.append(li);
+  }
+  const { dot, arrow } = aeroMarker.userData;
+  const m = PAPER_METERS[ui.shape] ?? 0.075;
+  const cg = new THREE.Vector3(...a.cg).multiplyScalar(1 / m);
+  dot.position.copy(cg);
+  arrow.position.copy(cg);
+  arrow.setDirection(new THREE.Vector3(...a.axes.forward));
+}
+
+// 解析結果から、飛び方の目安を言葉にする
+function aeroNotes(a) {
+  const out = [];
+  if (a.wingArea * 1e4 < 5) {
+    out.push(['warn', '翼がほとんどありません。翼を広げると、よく滑空します。']);
+    return out;
+  }
+  if (a.staticMargin < 0) out.push(['warn', '重心が空力中心より後ろです。機首が上がって失速しやすくなります（先を重くしよう）。']);
+  else if (a.staticMargin > 0.4) out.push(['warn', '重心がかなり前です。安定しますが、すぐに落ちやすくなります。']);
+  else out.push(['good', '重心の位置はちょうどよい範囲です。']);
+  if (a.dihedral < -3) out.push(['warn', '翼が下がっています（下反角）。少し上に開くと左右に安定します。']);
+  else if (a.dihedral > 25) out.push(['warn', '翼が上がりすぎています。揚力が減ります。']);
+  if (a.symmetry < 0.9) out.push(['warn', '左右の形がずれています。左右どちらかに曲がりやすくなります。']);
+  if (a.sideArea < a.wingArea * 0.05) out.push(['warn', '胴（キール）が小さいので、まっすぐ飛びにくくなります。']);
+  return out;
+}
+
 
 // ================================================================ アニメーション
 
@@ -1258,6 +1349,7 @@ function loop() {
 }
 
 $('version').textContent = `v${VERSION}`;
+$('aero-marker').onchange = () => { aeroMarker.visible = !!lastAero && $('aero-marker').checked; };
 updateTextures();
 resize();
 renderSteps();
@@ -1270,6 +1362,7 @@ loop();
 window.__origami = {
   get state() { return state; },
   get busy() { return busy; },
+  get aero() { return lastAero; },
   playPreset: (id) => playPreset(PRESETS.find((p) => p.id === id)),
   bgm,
   setView,
