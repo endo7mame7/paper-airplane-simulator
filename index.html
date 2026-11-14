@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>折り紙シミュレーター</title>
-  <meta name="description" content="ブラウザで紙を折って遊べる 3D 折り紙シミュレーター">
+  <title>紙飛行機シミュレーター</title>
+  <meta name="description" content="紙飛行機を折って、投げて、飛距離を競う 3D ゲーム">
   <link rel="stylesheet" href="css/style.css">
   <script type="importmap">
     {
@@ -31,9 +31,7 @@
             <button data-value="valley" class="on" title="手前に折る (V)">谷折り</button>
             <button data-value="mountain" title="向こう側に折る (M)">山折り</button>
             <button data-value="crease" title="折ってから開き、折り筋だけ残す (C)">折り筋</button>
-            <button data-value="squash" title="袋を開いてつぶす（つぶし折り）(S)">袋をつぶす</button>
             <button data-value="reverse" title="袋の先を内側に折り込む（中割り折り）(I)">中割り</button>
-            <button data-value="petal" title="下の角を持ち上げ、左右を内側に折り込む（花弁折り）(O)">花弁折り</button>
           </div>
           <div class="seg" data-group="mode">
             <button data-value="all" class="on" title="重なっている紙をまとめて折る (A)">全部の層</button>
@@ -110,6 +108,7 @@
         <button id="btn-undo" title="元に戻す (Ctrl+Z)">↶ 戻す</button>
         <button id="btn-redo" title="やり直す (Ctrl+Y)">↷ やり直す</button>
         <button id="btn-orbit" class="toggle" title="左ドラッグで視点を回す">⟲ 視点</button>
+        <button id="btn-menu" title="メインメニューへ">≡ メニュー</button>
         <button id="btn-fly" class="mode" title="コースで飛ばす / 折る画面に戻る (Tab)">✈ 飛ばす</button>
         <button id="btn-view-fly" class="fly-only" title="カメラを切り替える (C)">🎥 横から</button>
         <button id="btn-wind" class="fly-only toggle on" title="風のあり・なし (W)">🌬 風あり</button>
@@ -120,8 +119,8 @@
 
     <aside id="panel">
       <header>
-        <h1>折り紙シミュレーター</h1>
-        <p class="sub">線を引いて紙を折ろう <span id="version" class="ver"></span></p>
+        <h1>紙飛行機シミュレーター</h1>
+        <p class="sub">線を引いて紙飛行機を折ろう <span id="version" class="ver"></span></p>
       </header>
 
       <section>
@@ -220,18 +219,74 @@
           <li><b>線</b>：紙の上をドラッグして折り線を引き、折りたい側をクリック。</li>
           <li><b>点→点</b>：動かしたい点（角など）を、重ねたい点までドラッグ。</li>
           <li><b>折り筋</b>：折ってすぐ開き、筋だけ残します。筋の端・交点・筋の上にも吸い付きます。</li>
-          <li><b>袋をつぶす</b>：2 枚が折り目でつながった「袋」のつけ根に線を引き、袋をクリック。袋を開いて左右対称につぶします。</li>
           <li><b>中割り</b>：袋の途中に線を引いて、先の側をクリック。先を内側に折り込みます。</li>
-          <li><b>花弁折り</b>：正方基本形の 1 枚目に、花弁のつけ根の横線を引き、下の角の側をクリック。</li>
           <li><b>上だけ</b>：クリックした所の一番上の部分を折ります。その上に乗っている紙も一緒に折れます（紙を突き抜けないように）。</li>
           <li>角や辺の中点には自動で吸い付きます。<kbd>Shift</kbd> で角度を 22.5° 単位に。</li>
           <li>右ドラッグ／2 本指で視点を回転、ホイール／ピンチで拡大縮小。</li>
-          <li><kbd>L</kbd> 線 / <kbd>P</kbd> 点→点 / <kbd>V</kbd> 谷 / <kbd>M</kbd> 山 / <kbd>C</kbd> 折り筋 / <kbd>S</kbd> 袋をつぶす / <kbd>I</kbd> 中割り / <kbd>O</kbd> 花弁折り</li>
+          <li><kbd>L</kbd> 線 / <kbd>P</kbd> 点→点 / <kbd>V</kbd> 谷 / <kbd>M</kbd> 山 / <kbd>C</kbd> 折り筋 / <kbd>I</kbd> 中割り</li>
           <li><kbd>A</kbd> 全部の層 / <kbd>T</kbd> 上だけ / <kbd>F</kbd> 裏返す / <kbd>R</kbd> 回す / <kbd>B</kbd> BGM / <kbd>Esc</kbd> 取り消し</li>
         </ul>
       </section>
     </aside>
   </div>
+
+  <!-- メインメニュー -->
+  <div id="menu" class="screen" hidden>
+    <div class="menu-box">
+      <div class="logo">✈</div>
+      <h1>紙飛行機シミュレーター</h1>
+      <p class="tagline">折って、投げて、どこまで飛ぶ？</p>
+      <div id="menu-best" class="menu-best"></div>
+      <div class="menu-buttons">
+        <button id="menu-fold" class="primary big">✎ 紙飛行機を折る</button>
+        <button id="menu-quick" class="big">✈ 見本ですぐ飛ばす</button>
+        <div id="menu-presets" class="menu-sub" hidden></div>
+        <button id="menu-ranking" class="big">🏆 ランキング</button>
+        <button id="menu-howto" class="big">？ あそびかた</button>
+      </div>
+      <div class="menu-settings">
+        <button id="menu-bgm" class="toggle">♪ BGM</button>
+        <button id="menu-wind" class="toggle on">🌬 風あり</button>
+      </div>
+      <p class="muted small"><span id="menu-version"></span></p>
+    </div>
+    <div id="howto" class="menu-panel" hidden>
+      <h2>あそびかた</h2>
+      <ol>
+        <li><b>折る</b>：紙の上をドラッグして折り線を引き、折りたい側をクリック。右の「飛行機としての性能」で飛びそうか確かめよう。翼の開き具合は「手順」のスライダーで変えられる。</li>
+        <li><b>飛ばす</b>：「✈ 飛ばす」で準備画面へ。性能を確かめて「コースへ」。</li>
+        <li><b>投げる</b>：ボタン（Space）を 3 回。振りかぶる → 強さを決める → 戻ってくるカーソルを白い「ジャスト」で止める。</li>
+        <li><b>風</b>：左上の矢印が風の向き。追い風は遠くへ、向かい風は手前に、横風は流される。</li>
+        <li><b>記録</b>：投げるたびに記録され、上位 10 件はランキングに残る。ランキングから、その紙飛行機を呼び出せる。</li>
+      </ol>
+      <p class="small muted">コツ：機首が重すぎると落ち、後ろが重いと失速する。翼が少し上向き（上反角）だとまっすぐ飛ぶ。</p>
+      <button id="howto-close" class="primary">閉じる</button>
+    </div>
+  </div>
+
+  <!-- 折り紙からコースへの準備画面 -->
+  <div id="brief" class="screen" hidden>
+    <div class="brief-card">
+      <div class="brief-label">FLIGHT CHECK</div>
+      <h2 id="brief-name"></h2>
+      <dl id="brief-stats" class="stats"></dl>
+      <div id="brief-stars" class="stars"></div>
+      <div class="brief-predict">
+        <div class="muted small">予想飛距離（10 m/s・無風）</div>
+        <div id="brief-predict" class="big"></div>
+        <div id="brief-best" class="muted small"></div>
+      </div>
+      <div id="brief-wind" class="brief-wind"></div>
+      <div class="row">
+        <button id="brief-back">✎ 折り直す</button>
+        <button id="brief-go" class="primary">コースへ ▶</button>
+      </div>
+      <p class="muted small">Enter でコースへ / Esc で折り直す</p>
+    </div>
+  </div>
+
+  <!-- 画面の切り替え演出 -->
+  <div id="wipe" aria-hidden="true"><span>✈</span></div>
 
   <script type="module" src="js/main.js"></script>
 </body>

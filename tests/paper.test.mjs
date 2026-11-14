@@ -95,7 +95,7 @@ test('展開図：半分の谷折りは谷線1本', () => {
   assert.equal(creasePattern(m)[0].type, 'mountain');
 });
 
-for (const preset of PRESETS.filter((p) => p.kind !== 'sim')) {
+for (const preset of PRESETS) {
   test(`見本「${preset.name}」がすべて折れる`, () => {
     let s = createPaper();
     for (const op of preset.steps) {
@@ -104,7 +104,7 @@ for (const preset of PRESETS.filter((p) => p.kind !== 'sim')) {
       s = r.state;
     }
     assert.ok(close(totalArea(s), 4, 1e-6));
-    // つぶし折りなどは内部で複数の手順になるので、まとまりの数で比べる
+    // 中割り折りなどは内部で複数の手順になるので、まとまりの数で比べる
     const groups = new Set(s.steps.map((st, i) => st.group ?? `single-${i}`));
     assert.equal(groups.size, preset.steps.length);
     assert.deepEqual(checkConnectivity(s, 1e-3), [], '紙が破れていない');

@@ -41,9 +41,7 @@ html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden; }
 #toolbar .seg { margin: 0; background: rgba(255,255,255,.94); backdrop-filter: blur(4px); box-shadow: 0 2px 10px rgba(0,0,0,.08); }
 #toolbar .seg button { padding: 8px 11px; white-space: nowrap; }
 #toolbar .seg button[data-value="crease"].on { background: #6b5a4e; border-color: #6b5a4e; }
-#toolbar .seg button[data-value="squash"].on { background: #7a3fb0; border-color: #7a3fb0; }
 #toolbar .seg button[data-value="reverse"].on { background: #0f8a6a; border-color: #0f8a6a; }
-#toolbar .seg button[data-value="petal"].on { background: #c06a12; border-color: #c06a12; }
 .ver { color: var(--muted); font-size: 11px; margin-left: 4px; }
 
 #toast {
@@ -218,7 +216,7 @@ button.primary { background: var(--accent); color: #fff; border-color: var(--acc
 #fly-result .rank:empty { display: none; }
 #fly-result .rank.new { color: #e53935; }
 #ranking {
-  position: absolute; top: 100px; right: 12px; width: 360px; max-width: calc(100% - 24px); max-height: calc(100% - 180px); overflow-y: auto;
+  position: fixed; z-index: 35; top: 100px; right: 12px; width: 360px; max-width: calc(100% - 24px); max-height: calc(100% - 180px); overflow-y: auto;
   background: rgba(255,253,248,.97); border-radius: 14px; padding: 14px 16px; box-shadow: 0 8px 30px rgba(0,0,0,.2); pointer-events: auto;
 }
 #ranking[hidden] { display: none; }
@@ -242,3 +240,63 @@ button.primary { background: var(--accent); color: #fff; border-color: var(--acc
 #wind-arrow { width: 44px; height: 44px; border-radius: 50%; background: rgba(255,255,255,.88); display: grid; place-items: center; box-shadow: 0 2px 8px rgba(0,0,0,.15); }
 #wind-arrow span { display: block; color: #1b6fd8; font-size: 22px; text-shadow: none; transition: transform .4s; }
 #fly-wind.calm #wind-arrow span { color: #bbb; }
+
+/* ---------------------------------------------------------------- メインメニュー・準備画面 */
+.screen { position: fixed; inset: 0; z-index: 30; display: flex; align-items: center; justify-content: center; padding: 16px; }
+.screen[hidden] { display: none; }
+body.menu #app #panel, body.menu #quickbar, body.menu #bottom, body.menu #fly-hud { display: none; }
+body.brief #panel, body.brief #bottom, body.brief #quickbar { display: none; }
+#menu { background: linear-gradient(180deg, rgba(20,40,70,.15), rgba(20,40,70,.35)); }
+.menu-box {
+  width: 380px; max-width: 100%; text-align: center; padding: 26px 26px 18px;
+  background: rgba(255,253,248,.93); border-radius: 22px; box-shadow: 0 16px 50px rgba(0,0,0,.25);
+}
+.menu-box .logo { font-size: 46px; color: var(--accent); line-height: 1; transform: rotate(-12deg); }
+.menu-box h1 { margin: 8px 0 2px; font-size: 26px; letter-spacing: .04em; }
+.menu-box .tagline { margin: 0 0 10px; color: var(--muted); }
+.menu-best { font-weight: 700; color: #c88a00; min-height: 1.2em; margin-bottom: 8px; }
+.menu-buttons { display: flex; flex-direction: column; gap: 9px; }
+button.big { padding: 13px 16px; font-size: 16px; font-weight: 700; border-radius: 12px; }
+.menu-sub { display: flex; gap: 8px; }
+.menu-sub[hidden] { display: none; }
+.menu-sub button { flex: 1; }
+.menu-settings { display: flex; gap: 8px; justify-content: center; margin-top: 14px; }
+.menu-settings button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.menu-panel {
+  position: absolute; width: 520px; max-width: calc(100% - 32px); max-height: calc(100% - 32px); overflow-y: auto;
+  background: var(--panel); border-radius: 18px; padding: 20px 24px; box-shadow: 0 16px 50px rgba(0,0,0,.3);
+}
+.menu-panel[hidden] { display: none; }
+.menu-panel h2 { margin-top: 0; }
+.menu-panel li { margin: 6px 0; line-height: 1.6; }
+body.menu #ranking { position: fixed; z-index: 40; top: 50%; left: 50%; right: auto; transform: translate(-50%, -50%); max-height: calc(100% - 40px); }
+
+#brief { justify-content: flex-end; background: linear-gradient(90deg, rgba(0,0,0,0) 40%, rgba(20,30,50,.25)); }
+.brief-card {
+  width: 360px; max-width: 100%; max-height: 100%; overflow-y: auto; margin-right: 4vw;
+  background: rgba(255,253,248,.96); border-radius: 18px; padding: 20px 22px; box-shadow: 0 12px 40px rgba(0,0,0,.25);
+  animation: brief-in .35s ease-out;
+}
+@keyframes brief-in { from { transform: translateX(40px); opacity: 0; } }
+.brief-label { font-size: 11px; letter-spacing: .25em; color: var(--accent); font-weight: 800; }
+.brief-card h2 { margin: 2px 0 10px; font-size: 20px; }
+.stars { margin: 10px 0; display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; font-size: 13px; }
+.stars .st { color: #f2a900; letter-spacing: .1em; text-align: right; }
+.stars .st .off { color: #ddd; }
+.brief-predict { text-align: center; background: #f6f0e4; border-radius: 12px; padding: 8px; }
+.brief-predict .big { font-size: 34px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.brief-wind { margin: 10px 0 4px; font-size: 13px; text-align: center; }
+.brief-card .row { margin-top: 12px; }
+.brief-card .row button { flex: 1; padding: 11px; font-size: 15px; font-weight: 700; }
+@media (max-width: 760px) {
+  #brief { justify-content: center; align-items: flex-end; background: linear-gradient(180deg, rgba(0,0,0,0) 30%, rgba(20,30,50,.3)); }
+  .brief-card { margin: 0; max-height: 70%; }
+}
+
+/* 切り替え演出：紙の色の幕が左から右へ通り過ぎ、紙飛行機が横切る */
+#wipe { position: fixed; inset: 0; z-index: 50; pointer-events: none; background: #fbf8f1; transform: translateX(-101%); }
+#wipe span { position: absolute; top: 45%; left: 10%; font-size: 64px; color: var(--accent); transform: rotate(-10deg); }
+#wipe.run { animation: wipe 1.3s cubic-bezier(.7,0,.3,1) forwards; }
+#wipe.run span { animation: wipe-plane 1.3s ease-in-out forwards; }
+@keyframes wipe { 0% { transform: translateX(-101%); } 40%, 60% { transform: translateX(0); } 100% { transform: translateX(101%); } }
+@keyframes wipe-plane { 0% { left: -10%; top: 60%; } 50% { left: 45%; top: 42%; } 100% { left: 110%; top: 25%; } }

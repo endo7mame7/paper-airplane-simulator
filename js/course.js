@@ -245,7 +245,7 @@ export class Course {
       sock.add(seg);
     }
     g.add(sock);
-    g.position.set(1.5, -2.5, 0);
+    g.position.set(4, -2.8, 0);
     this.scene.add(g);
     this.sock = sock;
 
@@ -284,6 +284,12 @@ export class Course {
     this.wind = this.windEnabled ? randomWind(seed) : CALM;
     this.o.onWind?.(this.wind);
     return this.wind;
+  }
+
+  // 決めておいた風にする（準備画面で見せた風）
+  setWind(w) {
+    this.wind = this.windEnabled ? w : CALM;
+    this.o.onWind?.(this.wind);
   }
 
   setWindEnabled(on) {
@@ -641,8 +647,36 @@ export class Course {
     return { pos, look };
   }
 
+  // メインメニューの背景：コースの上をゆっくり回るカメラ（紙飛行機は出さない）
+  setAttract(on) {
+    this.attract = on;
+    this.planeOuter.visible = !on;
+    this.trail.visible = !on;
+    this.markerGroup.visible = !on;
+  }
+
+  // コースに出たときの演出：空の高い所から、投げる人の後ろへ降りてくる
+  playIntro() {
+    this.camera.position.set(22, -16, 16);
+    this.camLook = new THREE.Vector3(12, 0, 0);
+    this.camera.lookAt(this.camLook);
+    this.introT = 0;
+  }
+
   updateCamera(dt) {
     let goal;
+    if (this.attract) {
+      const a = this.clock * 0.08;
+      goal = {
+        pos: new THREE.Vector3(14 + Math.cos(a) * 16, Math.sin(a) * 16, 5 + Math.sin(a * 0.7) * 1.5),
+        look: new THREE.Vector3(14, 0, 0.5),
+      };
+      this.camera.position.copy(goal.pos);
+      this.camLook = goal.look;
+      this.camera.lookAt(goal.look);
+      return;
+    }
+    if (this.introT !== undefined && this.introT < 2.5) this.introT += dt;
     if (['ready', 'power', 'impact', 'throwing'].includes(this.phase)) {
       goal = this.resetCamera(false);
     } else {
@@ -663,7 +697,9 @@ export class Course {
         };
       }
     }
-    const k = 1 - Math.exp(-dt * (this.phase === 'flying' ? 7 : 3));
+    // 演出中はゆっくり、そのあとは速く追う
+    const intro = this.introT !== undefined && this.introT < 2.5;
+    const k = 1 - Math.exp(-dt * (this.phase === 'flying' ? 7 : intro ? 1.8 : 3));
     this.camera.position.lerp(goal.pos, k);
     this.camLook = (this.camLook ?? goal.look.clone()).lerp(goal.look, k);
     this.camera.lookAt(this.camLook);
