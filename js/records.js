@@ -113,6 +113,7 @@ export class Records {
       power: e.power ?? null,
       plane: e.plane ?? null,
       planeName: e.planeName ?? '',
+      wind: e.wind ?? null,
     };
     this.data.history.unshift(record);
     this.data.history.length = Math.min(this.data.history.length, HISTORY_SIZE);

@@ -33,7 +33,7 @@ export const DEFAULT_SIM = {
   dt: 0.001,       // 計算の刻み [s]
   maxTime: 60,     // これ以上は計算しない [s]
   sampleEvery: 1 / 60, // 軌跡を記録する間隔 [s]
-  wind: [0, 0, 0], // 風 [m/s]（地面の座標）
+  wind: [0, 0, 0], // 風 [m/s]（地面の座標）。関数 (t, pos) => [x, y, z] なら時刻・場所で変わる風
   cd0: 0.04,       // 紙の形の抗力係数（翼の面積あたり）
   oswald: 0.8,     // 翼効率 e
 };
@@ -241,6 +241,7 @@ export function simulateThrow(aero, throwOpts = {}, simOpts = {}) {
   const th = { ...DEFAULT_THROW, ...throwOpts };
   const sim = { ...DEFAULT_SIM, ...simOpts };
   const af = makeAirframe(aero, sim);
+  const windAt = typeof sim.wind === 'function' ? sim.wind : () => sim.wind;
   const ang = th.angle * RAD;
   const yaw = th.yaw * RAD;
   let s = {
@@ -261,7 +262,7 @@ export function simulateThrow(aero, throwOpts = {}, simOpts = {}) {
     t, pos: st.pos.slice(), theta: st.theta, phi: st.phi, psi: st.psi, V: info.V, alpha: info.alpha,
   });
   while (t < sim.maxTime) {
-    const { next, info } = step(af, s, sim.dt, sim.wind);
+    const { next, info } = step(af, s, sim.dt, windAt(t, s.pos));
     if (t >= nextSample) { record(s, info); nextSample += sim.sampleEvery; }
     if (next.pos[2] <= 0) {
       // 地面に着いた瞬間を線形補間で求める

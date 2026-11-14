@@ -236,3 +236,9 @@ button.primary { background: var(--accent); color: #fff; border-color: var(--acc
 #ranking-list .who { font-size: 12px; color: var(--muted); grid-column: 2; }
 #ranking-list button { grid-row: 1 / span 2; grid-column: 3; padding: 4px 8px; font-size: 12px; }
 #ranking-list:empty::before { content: "まだ記録がありません。投げてみよう！"; color: var(--muted); font-size: 13px; }
+
+/* 風 */
+#fly-wind { position: absolute; top: 60px; left: 12px; display: flex; align-items: center; gap: 8px; color: #fff; text-shadow: 0 1px 4px rgba(0,0,0,.5); font-size: 14px; font-weight: 700; }
+#wind-arrow { width: 44px; height: 44px; border-radius: 50%; background: rgba(255,255,255,.88); display: grid; place-items: center; box-shadow: 0 2px 8px rgba(0,0,0,.15); }
+#wind-arrow span { display: block; color: #1b6fd8; font-size: 22px; text-shadow: none; transition: transform .4s; }
+#fly-wind.calm #wind-arrow span { color: #bbb; }

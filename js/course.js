@@ -7,6 +7,7 @@
 import * as THREE from 'three';
 import { simulateThrow } from './flight.js';
 import { THROW_LIMITS, SWING, speedFromPower, swingResult } from './swing.js';
+import { randomWind, windVector, windField, CALM } from './wind.js';
 
 const RAD = Math.PI / 180;
 const HAND = new THREE.Vector3(0, 0, 1.6); // 手を離す位置（flight.js の height と合わせる）
@@ -132,8 +133,12 @@ export class Course {
     this.view = 'chase'; // 'chase' | 'side'
     this.aero = null;
     this.markers = [];
+    this.windEnabled = true;
+    this.wind = CALM;
+    this.clock = 0;
 
     this.buildWorld();
+    this.buildWind();
     this.buildThrower();
     this.buildPlane();
     this.resetCamera(true);
@@ -211,6 +216,108 @@ export class Course {
     bestLine.position.z = 0.008;
     this.bestGroup.add(bestLine);
     s.add(this.bestGroup);
+  }
+
+  // 吹き流しと、風に流れる綿毛
+  buildWind() {
+    const g = new THREE.Group();
+    const pole = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.02, 0.025, 2.2, 10),
+      new THREE.MeshStandardMaterial({ color: 0xdddddd, metalness: 0.3, roughness: 0.5 }),
+    );
+    pole.rotation.x = Math.PI / 2;
+    pole.position.z = 1.1;
+    pole.castShadow = true;
+    g.add(pole);
+    // 吹き流し：風下へ向く円すい（赤白のしま）。付け根を軸に回す
+    const sock = new THREE.Group();
+    sock.position.z = 2.15;
+    const len = 0.7;
+    for (let i = 0; i < 4; i++) {
+      const r0 = 0.12 - i * 0.02, r1 = 0.12 - (i + 1) * 0.02;
+      const seg = new THREE.Mesh(
+        new THREE.CylinderGeometry(r1, r0, len / 4, 16, 1, true),
+        new THREE.MeshStandardMaterial({ color: i % 2 ? 0xffffff : 0xe53935, side: THREE.DoubleSide, roughness: 0.8 }),
+      );
+      seg.rotation.z = -Math.PI / 2; // 円すいの軸を +x に
+      seg.position.x = (i + 0.5) * (len / 4);
+      seg.castShadow = true;
+      sock.add(seg);
+    }
+    g.add(sock);
+    g.position.set(1.5, -2.5, 0);
+    this.scene.add(g);
+    this.sock = sock;
+
+    // 綿毛（風で流れる点）
+    const N = 260;
+    this.fluffBox = { x: 16, y: 10, z: 4 };
+    const pos = new Float32Array(N * 3);
+    for (let i = 0; i < N; i++) {
+      pos[i * 3] = (Math.random() - 0.5) * this.fluffBox.x;
+      pos[i * 3 + 1] = (Math.random() - 0.5) * this.fluffBox.y;
+      pos[i * 3 + 2] = Math.random() * this.fluffBox.z;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    // 丸くぼかした点
+    const dotCanvas = document.createElement('canvas');
+    dotCanvas.width = dotCanvas.height = 32;
+    const dc = dotCanvas.getContext('2d');
+    const grd = dc.createRadialGradient(16, 16, 0, 16, 16, 16);
+    grd.addColorStop(0, 'rgba(255,255,255,1)');
+    grd.addColorStop(0.5, 'rgba(255,255,255,.7)');
+    grd.addColorStop(1, 'rgba(255,255,255,0)');
+    dc.fillStyle = grd;
+    dc.fillRect(0, 0, 32, 32);
+    this.fluff = new THREE.Points(geo, new THREE.PointsMaterial({
+      color: 0xffffff, size: 0.05, map: new THREE.CanvasTexture(dotCanvas),
+      transparent: true, opacity: 0.85, depthWrite: false,
+    }));
+    this.fluff.frustumCulled = false;
+    this.scene.add(this.fluff);
+    this.fluffCenter = new THREE.Vector3(4, 0, 0);
+  }
+
+  // 新しい風にする（風なしのときは無風）
+  newWind(seed) {
+    this.wind = this.windEnabled ? randomWind(seed) : CALM;
+    this.o.onWind?.(this.wind);
+    return this.wind;
+  }
+
+  setWindEnabled(on) {
+    this.windEnabled = on;
+    if (this.phase === 'ready' || this.phase === 'landed') this.newWind();
+  }
+
+  updateWind(dt) {
+    this.clock += dt;
+    // 飛んでいる間は、飛行計算と同じ時刻の風
+    const t = this.phase === 'flying' || this.phase === 'landed' ? this.flightT : this.clock;
+    const v = windVector(this.wind, t);
+    const sp = Math.hypot(v[0], v[1]);
+    // 吹き流し：風下を向き、弱い風ではだらりと下がる
+    const droop = (Math.PI / 2) * (1 - Math.min(1, sp / 2.2)) * 0.9;
+    this.sock.rotation.set(0, droop, sp > 0.02 ? Math.atan2(v[1], v[0]) : this.sock.rotation.z, 'ZYX');
+    // 綿毛：カメラの見ている辺りの箱の中を流れる（はみ出したら反対側へ）
+    const c = this.fluffCenter.lerp(this.camLook ?? this.fluffCenter, 0.05);
+    const arr = this.fluff.geometry.attributes.position.array;
+    const B = this.fluffBox;
+    const wobble = Math.sin(this.clock * 1.3);
+    for (let i = 0; i < arr.length; i += 3) {
+      arr[i] += (v[0] + 0.05 * Math.sin(this.clock + i)) * dt;
+      arr[i + 1] += (v[1] + 0.05 * Math.cos(this.clock * 0.7 + i)) * dt;
+      arr[i + 2] += 0.04 * wobble * Math.sin(i) * dt;
+      const wrap = (k, half, center) => {
+        const d = arr[i + k] - center;
+        if (d > half) arr[i + k] -= half * 2; else if (d < -half) arr[i + k] += half * 2;
+      };
+      wrap(0, B.x / 2, c.x);
+      wrap(1, B.y / 2, c.y);
+      if (arr[i + 2] < 0.05) arr[i + 2] += B.z - 0.1; else if (arr[i + 2] > B.z) arr[i + 2] -= B.z - 0.1;
+    }
+    this.fluff.geometry.attributes.position.needsUpdate = true;
   }
 
   buildThrower() {
@@ -306,6 +413,7 @@ export class Course {
   // ---------------------------------------------------------------- 操作
 
   reset() {
+    this.newWind();
     this.phase = 'ready';
     this.flight = null;
     this.flightT = 0;
@@ -363,8 +471,8 @@ export class Course {
     const yaw = this.yaw + sw.yawErr;
     this.flight = simulateThrow(this.aero, {
       speed: sw.speed, angle, yaw, bank: sw.bankErr, height: HAND.z,
-    });
-    Object.assign(this.flight, { speed: sw.speed, angle, yaw, swing: this.swing });
+    }, { wind: windField(this.wind) });
+    Object.assign(this.flight, { speed: sw.speed, angle, yaw, swing: this.swing, wind: this.wind });
     this.phase = 'throwing';
     this.throwAnim = 0;
     this.o.onSwing?.(this.swing);
@@ -455,6 +563,7 @@ export class Course {
       this.pose = pose;
     }
     this.updateCamera(dt);
+    this.updateWind(dt);
     // 影を紙飛行機の近くに落とす
     const p = this.planeOuter.position;
     this.sun.position.set(p.x - 3, p.y - 4, 10);

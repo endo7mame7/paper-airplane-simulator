@@ -12,6 +12,7 @@ import { analyzeAirplane } from './aero.js';
 import { simulateThrow } from './flight.js';
 import { Course, SWING, speedFromPower } from './course.js';
 import { Records, planeId } from './records.js';
+import { describeWind } from './wind.js';
 
 // ================================================================ 状態
 
@@ -1478,7 +1479,19 @@ const course = new Course({
   onLanded: (f) => showFlyResult(f),
   onUpdate: (info) => updateFlyHud(info),
   onSwing: (sw) => showGrade(sw),
+  onWind: () => updateWindHud(),
 });
+
+// 風の表示：矢印は風が吹いていく向き（画面の上が投げる方向）
+function updateWindHud() {
+  const w = course.wind;
+  const d = describeWind(w, course.yaw);
+  $('wind-text').textContent = d.text;
+  $('fly-wind').classList.toggle('calm', w.speed < 0.05);
+  // ➤ は右向きの文字。上（投げる方向）を 0° として、左回りの風向きを画面の回転に直す
+  const rel = (w.dir * 180) / Math.PI - course.yaw;
+  $('wind-arrow').firstElementChild.style.transform = `rotate(${-90 - rel}deg) scale(${0.7 + 0.3 * Math.min(1, w.speed / 2)})`;
+}
 
 const GRADE_TEXT = { just: 'ジャスト！', good: 'ナイス', early: '早い！', late: '遅い！', miss: 'ミス…' };
 let gradeTimer = 0;
@@ -1526,6 +1539,10 @@ function exitFly() {
 }
 
 function updateFlyStatic() {
+  updateWindHud();
+  const wb = $('btn-wind');
+  wb.classList.toggle('on', course.windEnabled);
+  wb.textContent = course.windEnabled ? '🌬 風あり' : '🌬 風なし';
   $('fly-angle').textContent = `${course.angle}°`;
   const y = course.yaw;
   $('fly-yaw').textContent = y === 0 ? 'まっすぐ' : `${y > 0 ? '左' : '右'} ${Math.abs(y)}°`;
@@ -1570,6 +1587,7 @@ function saveThrow(f) {
   const res = records.add({
     distance: f.distance, lateral: f.lateral, time: f.time, speed: f.speed, angle: f.angle,
     grade: sw.grade, power: sw.power,
+    wind: f.wind ? { speed: f.wind.speed, text: describeWind(f.wind, f.yaw - (sw.yawErr ?? 0)).text } : null,
     plane: currentPlane, planeName: planeLabel(),
     state: cloneState(state),
     paper: { shape: ui.shape, frontColor: ui.frontColor, backColor: ui.backColor, pattern: ui.pattern },
@@ -1608,7 +1626,8 @@ function renderRanking() {
     const who = document.createElement('span');
     who.className = 'who';
     const grade = r.grade ? `・${GRADE_TEXT[r.grade]}` : '';
-    who.textContent = `${r.name || 'ななし'}・${r.planeName || '紙飛行機'}${grade}・${fmtDate(r.date)}`;
+    const wind = r.wind ? `・${r.wind.text}` : '';
+    who.textContent = `${r.name || 'ななし'}・${r.planeName || '紙飛行機'}${grade}${wind}・${fmtDate(r.date)}`;
     li.append(no, dist);
     if (r.state) {
       const b = document.createElement('button');
@@ -1661,7 +1680,7 @@ function showFlyResult(f) {
   const sw = f.swing;
   $('fly-result-grade').textContent = sw ? `${GRADE_TEXT[sw.grade]}　強さ ${Math.round(sw.power * 100)}%` : '';
   const side = Math.abs(f.lateral) < 0.05 ? 'まっすぐ' : `${f.lateral > 0 ? '左' : '右'}へ ${Math.abs(f.lateral).toFixed(2)} m`;
-  $('fly-result-sub').textContent = `${f.speed.toFixed(1)} m/s・${Math.round(f.angle)}°で投げて、滞空 ${f.time.toFixed(2)} 秒・${side}`;
+  $('fly-result-sub').textContent = `${f.speed.toFixed(1)} m/s・${Math.round(f.angle)}°で投げて、滞空 ${f.time.toFixed(2)} 秒・${side}${f.wind && f.wind.speed >= 0.05 ? `・${describeWind(f.wind, course.yaw).text}` : ''}`;
   $('fly-result').hidden = false;
 }
 
@@ -1688,6 +1707,7 @@ function flyKeyDown(e) {
   else if (k.toLowerCase() === 'c') course.setView(course.view === 'side' ? 'chase' : 'side');
   else if (k === 'Enter' && course.phase === 'landed') flyAgain();
   else if (k.toLowerCase() === 'r') toggleRanking();
+  else if (k.toLowerCase() === 'w') course.setWindEnabled(!course.windEnabled);
   else if (k === 'Escape') { if (!$('ranking').hidden) toggleRanking(false); else exitFly(); }
   updateFlyStatic();
 }
@@ -1697,6 +1717,7 @@ $('btn-fly').onclick = toggleFly;
 $('btn-view-fly').onclick = () => { course.setView(course.view === 'side' ? 'chase' : 'side'); updateFlyStatic(); };
 $('btn-again').onclick = flyAgain;
 $('btn-ranking').onclick = () => toggleRanking();
+$('btn-wind').onclick = () => { course.setWindEnabled(!course.windEnabled); updateFlyStatic(); };
 $('btn-ranking-close').onclick = () => toggleRanking(false);
 $('player-name').oninput = (e) => {
   records.name = e.target.value.trim();
