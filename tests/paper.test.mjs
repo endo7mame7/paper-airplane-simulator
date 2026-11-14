@@ -95,7 +95,7 @@ test('展開図：半分の谷折りは谷線1本', () => {
   assert.equal(creasePattern(m)[0].type, 'mountain');
 });
 
-for (const preset of PRESETS.filter((p) => p.kind !== 'sim')) {
+for (const preset of PRESETS) {
   test(`見本「${preset.name}」がすべて折れる`, () => {
     let s = createPaper();
     for (const op of preset.steps) {
@@ -104,9 +104,42 @@ for (const preset of PRESETS.filter((p) => p.kind !== 'sim')) {
       s = r.state;
     }
     assert.ok(close(totalArea(s), 4, 1e-6));
-    // つぶし折りなどは内部で複数の手順になるので、まとまりの数で比べる
+    // 中割り折りなどは内部で複数の手順になるので、まとまりの数で比べる
     const groups = new Set(s.steps.map((st, i) => st.group ?? `single-${i}`));
     assert.equal(groups.size, preset.steps.length);
     assert.deepEqual(checkConnectivity(s, 1e-3), [], '紙が破れていない');
   });
 }
+
+test('左右の翼（同じ線で続けて「上だけ」折った手順）を対として見つける', async () => {
+  const { pairedSteps } = await import('../js/paper.js');
+  const p = PRESETS.find((q) => q.id === 'airplane');
+  let s = createPaper();
+  for (const op of p.steps) s = applyOp(s, op).state;
+  const pairs = pairedSteps(s.steps);
+  assert.equal(pairs.get(5), 6);
+  assert.equal(pairs.get(6), 5);
+  assert.equal(pairs.size, 2); // 中心へ折る手順などは対にしない
+});
+
+test('翼を開いたまま裏返すと、開き具合はそのままで鏡に映した形になる', () => {
+  const p = PRESETS.find((q) => q.id === 'airplane');
+  let s = createPaper();
+  for (const op of p.steps) s = applyOp(s, op).state;
+  p.steps.forEach((op, i) => { if (op.angle !== undefined) s.steps[i].angle = op.angle; });
+  const before = poseFaces(s);
+  const cx = bounds(s).cx;
+  const f = flip(s).state;
+  s.steps.forEach((st, i) => { f.steps[i].angle = st.angle; }); // 前の手順の角度は引き継ぐ
+  const after = poseFaces(f);
+  for (const { face, pts } of after) {
+    const b = before.find((q) => q.face.id === face.id);
+    assert.ok(b, `face ${face.id}`);
+    // 縦の軸まわりに 180° 回す：x → 2cx - x、z → -z（重なりのすき間の分だけずれてよい）
+    const mirrored = b.pts.map(([x, y, z]) => [2 * cx - x, y, -z]);
+    for (const P of pts) {
+      const d = Math.min(...mirrored.map((Q) => Math.hypot(P[0] - Q[0], P[1] - Q[1], P[2] - Q[2])));
+      assert.ok(d < 0.08, `face ${face.id}: ${d}`);
+    }
+  }
+});

@@ -3,16 +3,20 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
   createPaper, fold, flip, rotate, makeLine, bisectorLine, sideOf, reflectPoint,
   poseFaces, creasePattern, snapPoints, bounds, cloneState, LAYER_GAP, isFrontUp,
-  squash, reverseFold, petalFold, addCrease, creaseSegmentsXY, faceAffine, clipToFaceUV,
+  reverseFold, addCrease, pairedSteps, creaseSegmentsXY, faceAffine, clipToFaceUV,
 } from './paper.js';
 import { VERSION } from './version.js';
+import { CHANGELOG } from './changelog.js';
 import { PRESETS, applyOp } from './presets.js';
 import { Bgm } from './bgm.js';
 import { analyzeAirplane } from './aero.js';
 import { simulateThrow } from './flight.js';
 import { Course, SWING, speedFromPower } from './course.js';
 import { Records, planeId } from './records.js';
-import { describeWind } from './wind.js';
+import { describeWind, randomWind, CALM } from './wind.js';
+import { TIP_CATEGORIES, shuffledTips } from './tips.js';
+import { Analysis, ANALYSIS_NOTE } from './analysis.js';
+import { diagnose } from './airflow.js';
 
 // ================================================================ 状態
 
@@ -24,7 +28,7 @@ const PAPER_SHAPES = {
 
 const ui = {
   input: 'line',      // 'line' | 'point'
-  type: 'valley',     // 'valley' | 'mountain' | 'crease' | 'squash' | 'reverse'
+  type: 'valley',     // 'valley' | 'mountain' | 'crease' | 'reverse'
   mode: 'all',        // 'all' | 'component'
   orbit: false,
   speed: 1,
@@ -328,7 +332,7 @@ function updateAero() {
   dl.innerHTML = '';
   notes.innerHTML = '';
   aeroMarker.visible = !!a && $('aero-marker').checked;
-  if (!a) { updateThrow(); return; }
+  if (!a) return;
   const rows = [
     ['重さ', `${fmt(a.mass * 1000, 2)} g`],
     ['翼の面積', `${fmt(a.wingArea * 1e4)} cm²`],
@@ -361,106 +365,6 @@ function updateAero() {
   dot.position.copy(cg);
   arrow.position.copy(cg);
   arrow.setDirection(new THREE.Vector3(...a.axes.forward));
-  updateThrow();
-}
-
-// ================================================================ 試し投げ
-
-let lastFlight = null;
-
-function updateThrow() {
-  const speed = +$('throw-speed').value;
-  const angle = +$('throw-angle').value;
-  $('throw-speed-v').textContent = `${speed.toFixed(1)} m/s`;
-  $('throw-angle-v').textContent = `${angle}°`;
-  lastFlight = lastAero ? simulateThrow(lastAero, { speed, angle }) : null;
-  drawTrajectory(lastFlight);
-  const out = $('throw-result');
-  if (!lastFlight) { out.textContent = '紙を折ると、投げたときの飛び方を計算します。'; return; }
-  const f = lastFlight;
-  const side = Math.abs(f.lateral) < 0.05 ? 'まっすぐ' : `${f.lateral > 0 ? '左' : '右'}へ ${Math.abs(f.lateral).toFixed(2)} m`;
-  out.innerHTML = `飛距離 <b>${f.distance.toFixed(2)} m</b>　滞空 ${f.time.toFixed(2)} 秒・最高 ${f.maxHeight.toFixed(2)} m・${side}`;
-}
-
-function drawTrajectory(f) {
-  const cv = $('traj');
-  const ctx = cv.getContext('2d');
-  const W = cv.width;
-  const H = cv.height;
-  ctx.clearRect(0, 0, W, H);
-  const pad = 26;
-  const sideH = H * 0.62; // 横から見た図の高さ
-  // 表示する範囲（最低 10m × 4m）
-  let maxX = 10, maxZ = 4, maxY = 1;
-  if (f) for (const p of f.path) {
-    maxX = Math.max(maxX, p.pos[0] * 1.05);
-    maxZ = Math.max(maxZ, p.pos[2] * 1.1);
-    maxY = Math.max(maxY, Math.abs(p.pos[1]) * 1.1);
-  }
-  const minX = f ? Math.min(0, ...f.path.map((p) => p.pos[0])) : 0;
-  const sx = (W - pad * 1.5) / (maxX - minX);
-  const kz = Math.min(sx, (sideH - pad * 1.2) / maxZ);
-  const X = (x) => pad + (x - minX) * sx;
-  const Zs = (z) => sideH - pad * 0.6 - z * kz;
-  const topMid = sideH + (H - sideH) / 2;
-  const ky = Math.min(sx, (H - sideH - 16) / 2 / maxY);
-  const Yt = (y) => topMid - y * ky;
-
-  ctx.font = '11px system-ui, sans-serif';
-  ctx.fillStyle = '#8a7f73';
-  ctx.strokeStyle = '#eee5d8';
-  ctx.lineWidth = 1;
-  // 1m ごとの目盛り
-  const stepM = maxX > 40 ? 10 : maxX > 20 ? 5 : maxX > 8 ? 2 : 1;
-  for (let m = 0; m <= maxX; m += stepM) {
-    ctx.beginPath(); ctx.moveTo(X(m), 6); ctx.lineTo(X(m), H - 4); ctx.stroke();
-    ctx.fillText(`${m}m`, X(m) + 2, sideH - 6);
-  }
-  // 地面と、上から見た図の中心線
-  ctx.strokeStyle = '#b9ab97';
-  ctx.beginPath(); ctx.moveTo(pad * 0.5, Zs(0)); ctx.lineTo(W - 4, Zs(0)); ctx.stroke();
-  ctx.setLineDash([4, 4]);
-  ctx.beginPath(); ctx.moveTo(pad * 0.5, topMid); ctx.lineTo(W - 4, topMid); ctx.stroke();
-  ctx.setLineDash([]);
-  ctx.beginPath(); ctx.moveTo(0, sideH); ctx.lineTo(W, sideH); ctx.stroke();
-  // 人
-  ctx.fillStyle = '#6b5a4e';
-  ctx.fillRect(X(0) - 2, Zs(1.6), 4, Zs(0) - Zs(1.6));
-  if (!f) return;
-
-  const line = (pick, color) => {
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    f.path.forEach((p, i) => {
-      const [x, y] = pick(p);
-      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-    });
-    ctx.stroke();
-  };
-  line((p) => [X(p.pos[0]), Zs(p.pos[2])], '#1b6fd8');
-  line((p) => [X(p.pos[0]), Yt(p.pos[1])], '#1b6fd8');
-  // 0.25 秒ごとに機首の向きを描く（横から見た図）
-  ctx.strokeStyle = '#e2463f';
-  ctx.lineWidth = 1.5;
-  let next = 0;
-  for (const p of f.path) {
-    if (p.t < next) continue;
-    next += 0.25;
-    const x = X(p.pos[0]);
-    const z = Zs(p.pos[2]);
-    const L = 9;
-    ctx.beginPath();
-    ctx.moveTo(x - Math.cos(p.theta) * L / 2, z + Math.sin(p.theta) * L / 2);
-    ctx.lineTo(x + Math.cos(p.theta) * L / 2, z - Math.sin(p.theta) * L / 2);
-    ctx.stroke();
-  }
-  // 落ちた所
-  const end = f.landing;
-  ctx.fillStyle = '#e2463f';
-  for (const [x, y] of [[X(end[0]), Zs(0)], [X(end[0]), Yt(end[1])]]) {
-    ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill();
-  }
 }
 
 // 解析結果から、飛び方の目安を言葉にする
@@ -546,7 +450,7 @@ async function flattenAll() {
   const targets = {};
   state.steps.forEach((s, i) => { if (s.angle !== fullAngle(s)) targets[i] = fullAngle(s); });
   if (Object.keys(targets).length) {
-    toast('開いている手順をたたみました');
+    toast('折るために、いったんたたみます');
     await animateAngles(targets, 500);
   }
 }
@@ -580,15 +484,21 @@ async function commit(result, targetAngle) {
 // 今の設定で折った結果を計算する（プレビューにも使う）
 function computeFold(line, side, pick) {
   const p = pick && { ...pick, select: viewFromBelow() ? 'bottom' : 'top' };
-  if (ui.type === 'squash') return squash(state, { line, side, pick: p });
   if (ui.type === 'reverse') return reverseFold(state, { line, side, pick: p });
-  if (ui.type === 'petal') return petalFold(state, { line, side, pick: p });
   const type = ui.type === 'crease' ? 'valley' : ui.type;
   return fold(state, { line, side, type, mode: ui.mode, pick: p });
 }
 
+// 新しく折るときは、線を引いた平らな形で折るために一度たたみ、折ったあとで元の開き具合に戻す
+async function restoreAngles(saved) {
+  const t = {};
+  saved.forEach((a, i) => { if (state.steps[i] && state.steps[i].angle !== a) t[i] = a; });
+  if (Object.keys(t).length) await animateAngles(t, 500);
+}
+
 function doFold(line, side, pick) {
   return runBusy(async () => {
+    const saved = state.steps.map((st) => st.angle);
     await flattenAll();
     if (ui.type === 'crease') {
       // 折ってから開いて、折り筋だけを残す
@@ -605,18 +515,20 @@ function doFold(line, side, pick) {
       state.steps.forEach((st, i) => { st.angle = angles[i]; });
       dirty = true;
       drawCreasePattern();
+      await restoreAngles(saved);
       return;
     }
-    await commit(computeFold(line, side, pick));
+    if (await commit(computeFold(line, side, pick))) await restoreAngles(saved);
   });
 }
 
+// 裏返す・回すは紙全体を動かすだけなので、開いている手順はそのままにする
 function doFlip() {
-  return runBusy(async () => { await flattenAll(); await commit(flip(state)); });
+  return runBusy(async () => { await commit(flip(state)); });
 }
 
 function doRotate() {
-  return runBusy(async () => { await flattenAll(); await commit(rotate(state, 90)); });
+  return runBusy(async () => { await commit(rotate(state, 90)); });
 }
 
 function undo() {
@@ -837,6 +749,7 @@ canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
 canvas.addEventListener('pointerdown', (ev) => {
   if (mode === 'fly') { ev.preventDefault(); flyPress(ev); return; } // 画面をタップしても投げられる
+  if (mode !== 'fold') return;
   input.pointers.add(ev.pointerId);
   if (input.pointers.size > 1) { // 2 本指は視点操作
     if (input.phase === 'drawing') cancelInput();
@@ -865,7 +778,7 @@ canvas.addEventListener('pointerdown', (ev) => {
 });
 
 canvas.addEventListener('pointermove', (ev) => {
-  if (mode === 'fly') return;
+  if (mode !== 'fold') return;
   if (busy || ui.orbit) { snapRing.visible = false; return; }
   const raw = pointerToPaper(ev);
   if (!raw) return;
@@ -903,7 +816,7 @@ function endPointer(ev) {
 }
 
 canvas.addEventListener('pointerup', (ev) => {
-  if (mode === 'fly') return;
+  if (mode !== 'fold') return;
   const wasDown = input.downAt;
   const isClick = wasDown && !moved(ev);
   endPointer(ev);
@@ -915,11 +828,6 @@ canvas.addEventListener('pointerup', (ev) => {
     if (len < 0.03) {
       cancelInput();
       if (wasDown.phase !== 'choose') updateHint('紙の上をドラッグして折り線を引いてください');
-      return;
-    }
-    if (ui.input === 'point' && (ui.type === 'squash' || ui.type === 'petal')) {
-      cancelInput();
-      toast('「袋をつぶす」と「花弁折り」は「線」モードで線を引いてください');
       return;
     }
     if (ui.input === 'point') {
@@ -1039,12 +947,11 @@ function updatePreview() {
   const L = 6;
   const a = { x: line.p.x - line.d.x * L, y: line.p.y - line.d.y * L };
   const b = { x: line.p.x + line.d.x * L, y: line.p.y + line.d.y * L };
-  foldLineMat.color.set({ valley: 0x2f6fd6, mountain: 0xd2392b, crease: 0x6b5a4e, squash: 0x7a3fb0, reverse: 0x0f8a6a, petal: 0xc06a12 }[ui.type]);
+  foldLineMat.color.set({ valley: 0x2f6fd6, mountain: 0xd2392b, crease: 0x6b5a4e, reverse: 0x0f8a6a }[ui.type]);
   previewGroup.add(lineQuad(a, b, w, z, foldLineMat));
 
   if (!side) return;
   // 動く部分の強調表示と、折った後の位置（点線）
-  if ((ui.type === 'squash' || ui.type === 'petal') && ui.input === 'point') return;
   const r = computeFold(line, side, pick);
   if (r.error) return;
   const first = state.steps.length;
@@ -1154,16 +1061,12 @@ function updateHint(msg) {
   if (busy) { el.textContent = ''; return; }
   if (ui.orbit) { el.textContent = 'ドラッグで視点を回転中（「⟲ 視点」で折るモードに戻ります）'; return; }
   if (input.phase === 'choose') {
-    el.textContent = ui.type === 'squash' ? 'つぶしたい袋をクリック（Esc で取り消し）'
-      : ui.type === 'reverse' ? '折り込みたい袋の先をクリック（Esc で取り消し）'
-      : ui.type === 'petal' ? '持ち上げる角の側をクリック（Esc で取り消し）'
+    el.textContent = ui.type === 'reverse' ? '折り込みたい袋の先をクリック（Esc で取り消し）'
       : ui.mode === 'component' ? '折りたい部分をクリック（Esc で取り消し）'
       : '折りたい側をクリック（Esc で取り消し）';
     return;
   }
-  if (ui.type === 'squash') { el.textContent = '袋のつけ根（ちょうつがいの折り目）に沿って線を引こう'; return; }
   if (ui.type === 'reverse') { el.textContent = '袋の途中に折り線を引いて、折り込む先をクリック'; return; }
-  if (ui.type === 'petal') { el.textContent = '花弁のつけ根の横線を、1 枚目の左右のふちの間に引こう'; return; }
   if (ui.input === 'point') {
     el.textContent = '動かしたい点を、重ねたい点までドラッグ';
   } else {
@@ -1175,7 +1078,7 @@ function updateHint(msg) {
 
 function stepLabel(s) {
   const cls = s.kind === 'rotate' || s.type === 'flip' ? 'other'
-    : s.type === 'squash' || s.type === 'reverse' || s.type === 'petal' ? 'special' : s.type;
+    : s.type === 'reverse' ? 'special' : s.type;
   if (s.label && !s.caption) return { text: s.label, cls };
   if (s.caption) return { text: s.caption, cls };
   if (s.kind === 'rotate') return { text: `${Math.round(s.full)}° 回す`, cls };
@@ -1188,13 +1091,15 @@ function renderSteps() {
   const ol = $('steps');
   ol.innerHTML = '';
   const groups = stepGroups();
+  const pairs = pairedSteps(state.steps);
   groups.forEach((g, n) => {
     const i = g[0];
     const s = state.steps[i];
     const li = document.createElement('li');
     if (g.includes(currentStep)) li.classList.add('current');
     const { text, cls } = stepLabel(s);
-    li.innerHTML = `<span class="num">${n + 1}</span><span><span class="tag ${cls}"></span>${text}</span>`;
+    const pair = pairs.has(i) ? '<span class="pair" title="左右の対になる手順">⇄</span>' : '';
+    li.innerHTML = `<span class="num">${n + 1}</span><span><span class="tag ${cls}"></span>${text}${pair}</span>`;
     if (s.kind === 'fold' && s.type !== 'flip') {
       const r = document.createElement('input');
       r.type = 'range'; r.min = 0; r.max = 180; r.step = 1; r.value = s.angle;
@@ -1205,6 +1110,11 @@ function renderSteps() {
       r.addEventListener('input', () => {
         if (busy) { r.value = state.steps[i].angle; return; }
         for (const j of g) state.steps[j].angle = +r.value;
+        // 左右の翼は、いっしょに動かす
+        if ($('link-wings').checked && pairs.has(i)) {
+          state.steps[pairs.get(i)].angle = +r.value;
+          syncStepSliders();
+        }
         cancelInput();
         dirty = true;
       });
@@ -1304,7 +1214,7 @@ bgm.volume = store.get('origami.bgmVolume', 0.5);
 $('bgm-volume').value = bgm.volume;
 
 function syncBgmButtons() {
-  for (const id of ['btn-bgm', 'btn-bgm2']) {
+  for (const id of ['btn-bgm', 'btn-bgm2', 'menu-bgm']) {
     $(id).classList.toggle('on', bgm.playing);
     $(id).setAttribute('aria-pressed', String(bgm.playing));
   }
@@ -1320,6 +1230,7 @@ async function toggleBgm() {
 
 $('btn-bgm').onclick = toggleBgm;
 $('btn-bgm2').onclick = toggleBgm;
+$('menu-bgm').onclick = toggleBgm;
 $('bgm-volume').oninput = (e) => { bgm.setVolume(+e.target.value); store.set('origami.bgmVolume', +e.target.value); };
 // 前回 BGM をオンにしていたら、最初に画面を触ったときに流す（ブラウザは操作前の自動再生を止めるため）
 if (store.get('origami.bgm', false)) {
@@ -1331,7 +1242,18 @@ if (store.get('origami.bgm', false)) {
 syncBgmButtons();
 
 window.addEventListener('keydown', (e) => {
+  if (loading) { loadingKeyDown(e); return; }
+  if (mode === 'analysis') { analysisKeyDown(e); return; }
   if (e.target.closest('input, select, textarea')) return;
+  if (mode === 'menu') {
+    if (e.key === 'Escape') { $('howto').hidden = true; $('ranking').hidden = true; $('menu-presets').hidden = true; }
+    return;
+  }
+  if (mode === 'brief') {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); goCourse(); }
+    else if (e.key === 'Escape' || e.key === 'Tab') { e.preventDefault(); closeBrief(); }
+    return;
+  }
   if (e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); toggleFly(); return; }
   if (mode === 'fly') { flyKeyDown(e); return; }
   const k = e.key.toLowerCase();
@@ -1342,9 +1264,7 @@ window.addEventListener('keydown', (e) => {
   else if (k === 'v') setSeg('type', 'type', 'valley');
   else if (k === 'm') setSeg('type', 'type', 'mountain');
   else if (k === 'c') setSeg('type', 'type', 'crease');
-  else if (k === 's') setSeg('type', 'type', 'squash');
   else if (k === 'i') setSeg('type', 'type', 'reverse');
-  else if (k === 'o') setSeg('type', 'type', 'petal');
   else if (k === 'l') { setSeg('input', 'input', 'line'); cancelInput(); }
   else if (k === 'p') { setSeg('input', 'input', 'point'); cancelInput(); }
   else if (k === 'a') setSeg('mode', 'mode', 'all');
@@ -1431,6 +1351,7 @@ function resize() {
   const r = canvas.getBoundingClientRect();
   renderer.setSize(r.width, r.height, false);
   course.resize(r.width, r.height);
+  analysis?.resize(r.width, r.height);
   const prevAspect = camera.aspect;
   camera.aspect = r.width / Math.max(1, r.height);
   camera.updateProjectionMatrix();
@@ -1452,7 +1373,12 @@ function loop() {
     rebuildGeometry();
     dirty = false;
   }
-  if (mode === 'fly') {
+  if (mode === 'analysis') {
+    updateAnalysisFrame(dt);
+    analysis.render();
+    return;
+  }
+  if (mode === 'fly' || mode === 'menu') {
     course.update(dt);
     course.render();
     return;
@@ -1504,7 +1430,387 @@ function showGrade(sw) {
 }
 
 function toggleFly() {
-  if (mode === 'fold') enterFly(); else exitFly();
+  if (mode === 'fold') openBrief();
+  else if (mode === 'brief') closeBrief();
+  else if (mode === 'fly') exitFly();
+}
+
+// ================================================================ メインメニュー
+
+function showMenu() {
+  if (mode === 'fly') exitFly();
+  if (mode === 'brief') closeBrief();
+  if (input.phase !== 'idle') cancelInput();
+  mode = 'menu';
+  document.body.classList.add('menu');
+  $('menu').hidden = false;
+  $('howto').hidden = true;
+  $('menu-presets').hidden = true;
+  $('ranking').hidden = true;
+  course.setAttract(true);
+  if (course.wind.speed === 0 && course.windEnabled) course.newWind();
+  updateMenu();
+  resize();
+}
+
+function leaveMenu() {
+  document.body.classList.remove('menu');
+  $('menu').hidden = true;
+  $('ranking').hidden = true;
+  course.setAttract(false);
+  mode = 'fold';
+  resize();
+  recenter(true);
+  updateHint();
+}
+
+function updateMenu() {
+  const b = records.best;
+  $('menu-best').textContent = b ? `🏆 ベスト ${b.distance.toFixed(2)} m${b.name ? `（${b.name}）` : ''}` : '';
+  $('menu-version').textContent = `v${VERSION}`;
+  const w = $('menu-wind');
+  w.classList.toggle('on', course.windEnabled);
+  w.textContent = course.windEnabled ? '🌬 風あり' : '🌬 風なし';
+  $('menu-fold').textContent = state.steps.length ? '✎ 折りかけの紙飛行機に戻る' : '✎ 紙飛行機を折る';
+}
+
+// 見本を、アニメーションなしですぐに折った状態にする
+function loadPresetInstant(preset) {
+  if (state.steps.length) undoStack.push(cloneState(state));
+  redoStack = [];
+  ui.shape = 'square';
+  $('paper-shape').value = 'square';
+  let s = createPaper(...PAPER_SHAPES.square);
+  for (const op of preset.steps) {
+    const first = s.steps.length;
+    const r = applyOp(s, op);
+    if (r.error) break;
+    s = r.state;
+    if (s.steps[first]) s.steps[first].caption = op.caption;
+  }
+  preset.steps.forEach((op, i) => { if (op.angle !== undefined && s.steps[i]) s.steps[i].angle = op.angle; });
+  state = s;
+  preset.lastId = planeId(state);
+  updateTextures();
+  dirty = true;
+  renderSteps();
+  drawCreasePattern();
+  recenter(true);
+  updateButtons();
+}
+
+// ================================================================ 準備画面（折り紙 → コース）
+
+let briefWind = CALM;
+
+function planeNameFor(st) {
+  const id = planeId(st);
+  const preset = PRESETS.find((p) => p.lastId === id);
+  if (preset) return preset.name;
+  return st.steps.length ? `${st.steps.length} 手で折った紙飛行機` : '折っていない紙';
+}
+
+function stars(n) {
+  return `${'★'.repeat(n)}<span class="off">${'★'.repeat(3 - n)}</span>`;
+}
+
+function openBrief() {
+  if (busy) { toast('折り終わるまで待ってください'); return; }
+  if (input.phase !== 'idle') cancelInput();
+  if (dirty) { rebuildGeometry(); dirty = false; }
+  const m = PAPER_METERS[ui.shape] ?? 0.075;
+  const a = analyzeAirplane(state, { metersPerUnit: m });
+  if (!a) { toast('紙がありません'); return; }
+  mode = 'brief';
+  document.body.classList.add('brief');
+  $('brief').hidden = false;
+  snapRing.visible = false;
+  clearPreview();
+  // 紙飛行機をゆっくり回して見せる
+  controls.autoRotate = true;
+  controls.autoRotateSpeed = 2.5;
+  resize();
+
+  $('brief-name').textContent = planeNameFor(state);
+  const dl = $('brief-stats');
+  dl.innerHTML = '';
+  for (const [k, v] of [
+    ['重さ', `${(a.mass * 1000).toFixed(2)} g`],
+    ['翼幅 × 全長', `${(a.span * 100).toFixed(1)} × ${(a.length * 100).toFixed(1)} cm`],
+    ['翼の面積', `${(a.wingArea * 1e4).toFixed(1)} cm²`],
+  ]) {
+    const dt = document.createElement('dt'); dt.textContent = k;
+    const dd = document.createElement('dd'); dd.textContent = v;
+    dl.append(dt, dd);
+  }
+  const sm = a.staticMargin, dih = a.dihedral, sym = a.symmetry, S = a.wingArea * 1e4;
+  const rate = [
+    ['重心のバランス', sm >= 0 && sm <= 0.25 ? 3 : sm >= -0.06 && sm <= 0.4 ? 2 : 1],
+    ['左右の安定（上反角）', dih >= 0 && dih <= 20 ? 3 : dih >= -12 && dih <= 30 ? 2 : 1],
+    ['まっすぐ飛ぶ（左右対称）', sym >= 0.97 ? 3 : sym >= 0.9 ? 2 : 1],
+    ['よく滑空する（翼の大きさ）', S >= 50 ? 3 : S >= 25 ? 2 : 1],
+  ];
+  $('brief-stars').innerHTML = rate.map(([k, n]) => `<span>${k}</span><span class="st">${stars(n)}</span>`).join('');
+  const pred = simulateThrow(a, { speed: 10, angle: 5 });
+  $('brief-predict').textContent = `${pred.distance.toFixed(1)} m`;
+  const pb = records.bestFor(planeId(state));
+  $('brief-best').textContent = pb ? `この紙飛行機のベスト ${pb.distance.toFixed(2)} m` : 'この紙飛行機はまだ投げていません';
+  briefWind = course.windEnabled ? randomWind() : CALM;
+  $('brief-wind').textContent = `いまのコースの風：${describeWind(briefWind).text}`;
+}
+
+function closeBrief() {
+  mode = 'fold';
+  document.body.classList.remove('brief');
+  $('brief').hidden = true;
+  controls.autoRotate = false;
+  resize();
+  updateHint();
+}
+
+// ================================================================ 分析モード（投げたあと）
+
+let analysis = null; // 最初の resize より前に参照されるので、あとで作る
+const an = { t: 0, playing: false, lastBuild: 0, diag: null };
+
+function enterAnalysis() {
+  const f = course.flight;
+  if (!f || course.phase !== 'landed') return;
+  mode = 'analysis';
+  document.body.classList.add('analysis');
+  $('analysis').hidden = false;
+  $('an-note').textContent = ANALYSIS_NOTE;
+  analysis.controls.enabled = true;
+  resize();
+  analysis.setup({ state, aero: course.aero, flight: f, metersPerUnit: course.metersPerUnit });
+  an.diag = diagnose(f, course.aero);
+  renderDiagnosis(an.diag);
+  const slider = $('an-time');
+  slider.max = f.time.toFixed(2);
+  // はじめは、いちばん揚力を使っている（迎え角の大きい）飛行中の瞬間を見せる
+  const mid = f.path.reduce((best, p) => (p.t > 0.2 && p.t < f.time - 0.1 && Math.abs(p.alpha) > Math.abs(best.alpha) && Math.abs(p.alpha) < 0.35 ? p : best), f.path[Math.floor(f.path.length / 3)] ?? f.path[0]);
+  an.t = mid.t;
+  an.playing = false;
+  $('an-play').textContent = '▶';
+  setAnalysisTime(an.t, true);
+}
+
+function exitAnalysis() {
+  mode = 'fly';
+  an.playing = false;
+  document.body.classList.remove('analysis');
+  $('analysis').hidden = true;
+  analysis.controls.enabled = false;
+  resize();
+}
+
+function renderDiagnosis(d) {
+  const ul = $('an-findings');
+  ul.innerHTML = '';
+  for (const f of d.findings) {
+    const li = document.createElement('li');
+    li.className = f.level;
+    const b = document.createElement('b'); b.textContent = f.title;
+    const p = document.createElement('span'); p.textContent = f.text;
+    const fix = document.createElement('span'); fix.className = 'fix'; fix.textContent = f.fix;
+    li.append(b, p, fix);
+    ul.append(li);
+  }
+  const st = d.stats;
+  const dl = $('an-stats');
+  dl.innerHTML = '';
+  for (const [k, v] of [
+    ['飛距離', `${st.distance.toFixed(2)} m`],
+    ['滞空時間', `${st.time.toFixed(2)} 秒`],
+    ['速さ（最高 / 最低）', `${st.maxV.toFixed(1)} / ${st.minV.toFixed(1)} m/s`],
+    ['迎え角（最大）', `${st.maxAlpha.toFixed(1)}°`],
+    ['失速していた時間', `${Math.round(st.stallFraction * 100)} %`],
+    ['揚抗比（平均 / この機体の最高）', `${st.meanLD.toFixed(1)} / ${st.bestLD.toFixed(1)}`],
+  ]) {
+    const dt = document.createElement('dt'); dt.textContent = k;
+    const dd = document.createElement('dd'); dd.textContent = v;
+    dl.append(dt, dd);
+  }
+}
+
+function setAnalysisTime(t, rebuild = false) {
+  const f = course.flight;
+  an.t = Math.max(0, Math.min(f.time, t));
+  $('an-time').value = an.t;
+  // 流れの計算は重いので、再生中は少し間をあけて計算し直す
+  const now = performance.now();
+  if (rebuild || now - an.lastBuild > 250) {
+    analysis.setTime(an.t);
+    an.lastBuild = now;
+  } else {
+    analysis.updateForces(analysis.sample = pathAt(f, an.t));
+  }
+  const p = analysis.sample;
+  const fo = analysis.forces;
+  $('an-readout').innerHTML = `<b>${an.t.toFixed(2)} 秒</b>　速さ <b>${p.V.toFixed(1)}</b> m/s　迎え角 <b>${(p.alpha * 180 / Math.PI).toFixed(1)}°</b>　高さ <b>${p.pos[2].toFixed(2)}</b> m　距離 <b>${Math.hypot(p.pos[0], p.pos[1]).toFixed(1)}</b> m　揚力 / 重さ <b>${(fo.L / fo.W).toFixed(2)}</b>　揚抗比 <b>${fo.LD.toFixed(1)}</b>`;
+  drawAnalysisChart();
+}
+
+function pathAt(f, t) {
+  let p = f.path[0];
+  for (const q of f.path) { if (q.t > t) break; p = q; }
+  return p;
+}
+
+// 下のグラフ：左は横から見た道すじ（失速した所は赤）、右は迎え角の変化（失速角の線つき）
+function drawAnalysisChart() {
+  const cv = $('an-chart');
+  const ctx = cv.getContext('2d');
+  const W = cv.width, H = cv.height;
+  ctx.clearRect(0, 0, W, H);
+  const f = course.flight;
+  const aStall = Math.min(35, 14 + 10 / Math.max(course.aero.aspectRatio, 0.05)); // flight.js と同じ
+  const split = W * 0.6;
+  const pad = 18;
+  // 横から見た道すじ
+  const maxX = Math.max(5, ...f.path.map((p) => Math.hypot(p.pos[0], p.pos[1])));
+  const maxZ = Math.max(2, ...f.path.map((p) => p.pos[2]));
+  const sx = (split - pad * 2) / maxX;
+  const sz = Math.min(sx, (H - pad * 2) / maxZ);
+  const X = (d) => pad + d * sx;
+  const Z = (z) => H - pad - z * sz;
+  ctx.strokeStyle = 'rgba(148,180,220,.35)';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(pad, Z(0)); ctx.lineTo(split - pad, Z(0)); ctx.stroke();
+  ctx.fillStyle = '#9fb4d0';
+  ctx.font = '20px system-ui, sans-serif';
+  ctx.fillText('横から見た道すじ', pad, 20);
+  for (let i = 1; i < f.path.length; i++) {
+    const a = f.path[i - 1], b = f.path[i];
+    ctx.strokeStyle = Math.abs(b.alpha) * 180 / Math.PI > aStall ? '#f87171' : '#60a5fa';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(X(Math.hypot(a.pos[0], a.pos[1])), Z(a.pos[2]));
+    ctx.lineTo(X(Math.hypot(b.pos[0], b.pos[1])), Z(b.pos[2]));
+    ctx.stroke();
+  }
+  const cur = pathAt(f, an.t);
+  ctx.fillStyle = '#fbbf24';
+  ctx.beginPath(); ctx.arc(X(Math.hypot(cur.pos[0], cur.pos[1])), Z(cur.pos[2]), 6, 0, Math.PI * 2); ctx.fill();
+  // 迎え角の変化
+  const x0 = split + pad, x1 = W - pad;
+  const T = Math.max(f.time, 0.1);
+  const aMax = Math.max(aStall + 5, ...f.path.map((p) => Math.abs(p.alpha) * 180 / Math.PI));
+  const tx = (t) => x0 + (t / T) * (x1 - x0);
+  const ay = (a) => H / 2 + 10 - (a / aMax) * (H / 2 - 22);
+  ctx.fillStyle = 'rgba(248,113,113,.15)';
+  ctx.fillRect(x0, ay(aMax), x1 - x0, ay(aStall) - ay(aMax));
+  ctx.fillRect(x0, ay(-aStall), x1 - x0, ay(-aMax) - ay(-aStall));
+  ctx.strokeStyle = 'rgba(148,180,220,.35)';
+  ctx.beginPath(); ctx.moveTo(x0, ay(0)); ctx.lineTo(x1, ay(0)); ctx.stroke();
+  ctx.fillStyle = '#9fb4d0';
+  ctx.fillText('迎え角（赤い帯 = 失速）', x0, 20);
+  ctx.strokeStyle = '#a78bfa';
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  f.path.forEach((p, i) => {
+    const x = tx(p.t), y = ay(p.alpha * 180 / Math.PI);
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+  ctx.strokeStyle = '#fbbf24';
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(tx(an.t), 26); ctx.lineTo(tx(an.t), H - 4); ctx.stroke();
+}
+
+function updateAnalysisFrame(dt) {
+  analysis.update(dt);
+  if (an.playing) {
+    const f = course.flight;
+    let t = an.t + dt * 0.5; // 半分の速さで再生
+    if (t >= f.time) { t = f.time; an.playing = false; $('an-play').textContent = '▶'; }
+    setAnalysisTime(t);
+  }
+}
+
+function toggleAnalysisPlay() {
+  if (!an.playing && an.t >= course.flight.time - 1e-3) an.t = 0;
+  an.playing = !an.playing;
+  $('an-play').textContent = an.playing ? '❚❚' : '▶';
+  if (!an.playing) setAnalysisTime(an.t, true);
+}
+
+function analysisKeyDown(e) {
+  if (e.key === 'Escape') exitAnalysis();
+  else if (e.key === ' ') { e.preventDefault(); toggleAnalysisPlay(); }
+  else if (e.key === 'ArrowRight') { e.preventDefault(); setAnalysisTime(an.t + 0.1, true); }
+  else if (e.key === 'ArrowLeft') { e.preventDefault(); setAnalysisTime(an.t - 0.1, true); }
+}
+
+// ================================================================ ローディング画面（準備画面 → コース）
+
+const LOAD_TIME = 2600; // 読み込みを見せる時間 [ms]
+let loading = null; // { start, ready, tips, i, timer }
+
+function goCourse() {
+  if (loading) return;
+  // 裏でコースを用意しておき、ローディング画面を上にかぶせる
+  closeBrief();
+  enterFly();
+  course.setWind(briefWind);
+  loading = { start: performance.now(), ready: false, tips: shuffledTips(), i: 0, timer: 0 };
+  const el = $('loading');
+  el.classList.remove('out');
+  el.hidden = false;
+  $('ld-title').textContent = 'コースへ移動中…';
+  $('ld-start').disabled = true;
+  $('ld-start').textContent = '読み込み中…';
+  showTip(0);
+  requestAnimationFrame(loadingTick);
+}
+
+function loadingTick() {
+  if (!loading) return;
+  const k = Math.min(1, (performance.now() - loading.start) / LOAD_TIME);
+  // はじめ速く、終わりはゆっくり
+  $('ld-fill').style.width = `${(100 * (1 - (1 - k) ** 2)).toFixed(1)}%`;
+  if (k < 1) { requestAnimationFrame(loadingTick); return; }
+  loading.ready = true;
+  $('ld-title').textContent = '準備ができました！';
+  const b = $('ld-start');
+  b.disabled = false;
+  b.textContent = 'コースへ ▶';
+  b.focus({ preventScroll: true });
+}
+
+function showTip(i) {
+  const n = loading.tips.length;
+  loading.i = (i + n) % n;
+  const t = loading.tips[loading.i];
+  const c = TIP_CATEGORIES[t.cat];
+  $('tip-icon').textContent = c.icon;
+  $('tip-cat').textContent = c.label;
+  $('tip-title').textContent = t.title;
+  $('tip-text').textContent = t.text;
+  $('tip-count').textContent = `${loading.i + 1} / ${n}`;
+  const card = document.querySelector('.tip-card');
+  card.classList.remove('swap');
+  void card.offsetWidth;
+  card.classList.add('swap');
+  // しばらくしたら次のヒントへ（自分で切り替えたら数え直す）
+  clearTimeout(loading.timer);
+  loading.timer = setTimeout(() => loading && showTip(loading.i + 1), 7000);
+}
+
+function finishLoading() {
+  if (!loading || !loading.ready) return;
+  clearTimeout(loading.timer);
+  loading = null;
+  const el = $('loading');
+  el.classList.add('out');
+  setTimeout(() => { el.hidden = true; el.classList.remove('out'); }, 500);
+  course.playIntro();
+}
+
+function loadingKeyDown(e) {
+  if (e.key === 'ArrowRight') { e.preventDefault(); showTip(loading.i + 1); }
+  else if (e.key === 'ArrowLeft') { e.preventDefault(); showTip(loading.i - 1); }
+  else if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); finishLoading(); }
 }
 
 function enterFly() {
@@ -1538,6 +1844,12 @@ function exitFly() {
   resize();
 }
 
+const VIEWS = ['chase', 'thrower', 'side'];
+const VIEW_LABEL = { chase: '🎥 追いかける', thrower: '🎥 見送る', side: '🎥 横から' };
+function nextView() {
+  return VIEWS[(VIEWS.indexOf(course.view) + 1) % VIEWS.length];
+}
+
 function updateFlyStatic() {
   updateWindHud();
   const wb = $('btn-wind');
@@ -1546,7 +1858,8 @@ function updateFlyStatic() {
   $('fly-angle').textContent = `${course.angle}°`;
   const y = course.yaw;
   $('fly-yaw').textContent = y === 0 ? 'まっすぐ' : `${y > 0 ? '左' : '右'} ${Math.abs(y)}°`;
-  $('btn-view-fly').textContent = course.view === 'side' ? '🎥 後ろから' : '🎥 横から';
+  $('btn-view-fly').textContent = VIEW_LABEL[course.view];
+  $('btn-view-fly').title = `カメラ：${VIEW_LABEL[course.view].slice(3)}（C で切り替え）`;
 }
 
 const swingX = (v) => `${(((v - SWING.min) / (1 - SWING.min)) * 100).toFixed(2)}%`;
@@ -1704,8 +2017,9 @@ function flyKeyDown(e) {
   else if (k === 'ArrowDown') { e.preventDefault(); course.setAngle(course.angle - 1); }
   else if (k === 'ArrowLeft') { e.preventDefault(); course.setYaw(course.yaw + 1); }
   else if (k === 'ArrowRight') { e.preventDefault(); course.setYaw(course.yaw - 1); }
-  else if (k.toLowerCase() === 'c') course.setView(course.view === 'side' ? 'chase' : 'side');
+  else if (k.toLowerCase() === 'c') course.setView(nextView());
   else if (k === 'Enter' && course.phase === 'landed') flyAgain();
+  else if (k.toLowerCase() === 'a' && course.phase === 'landed') enterAnalysis();
   else if (k.toLowerCase() === 'r') toggleRanking();
   else if (k.toLowerCase() === 'w') course.setWindEnabled(!course.windEnabled);
   else if (k === 'Escape') { if (!$('ranking').hidden) toggleRanking(false); else exitFly(); }
@@ -1714,7 +2028,7 @@ function flyKeyDown(e) {
 
 
 $('btn-fly').onclick = toggleFly;
-$('btn-view-fly').onclick = () => { course.setView(course.view === 'side' ? 'chase' : 'side'); updateFlyStatic(); };
+$('btn-view-fly').onclick = () => { course.setView(nextView()); updateFlyStatic(); };
 $('btn-again').onclick = flyAgain;
 $('btn-ranking').onclick = () => toggleRanking();
 $('btn-wind').onclick = () => { course.setWindEnabled(!course.windEnabled); updateFlyStatic(); };
@@ -1757,9 +2071,52 @@ for (const btn of document.querySelectorAll('#fly-controls [data-adj]')) {
 }
 
 $('version').textContent = `v${VERSION}`;
-$('throw-speed').oninput = updateThrow;
-$('throw-angle').oninput = updateThrow;
-updateThrow();
+
+// ================================================================ バージョン情報
+
+function showVersionInfo() {
+  const ol = $('vi-list');
+  if (!ol.children.length) {
+    CHANGELOG.forEach((e, i) => {
+      const li = document.createElement('li');
+      if (/折り紙シミュレーター）$/.test(e.summary)) li.className = 'origami';
+      const det = document.createElement('details');
+      if (i === 0) det.open = true;
+      const sum = document.createElement('summary');
+      const v = document.createElement('span'); v.className = 'v'; v.textContent = `v${e.version}`;
+      const d = document.createElement('span'); d.className = 'd'; d.textContent = e.date.replace(/-/g, '/');
+      const t = document.createElement('span'); t.className = 's'; t.textContent = e.summary;
+      if (i === 0) { const n = document.createElement('span'); n.className = 'new'; n.textContent = '最新'; t.append(n); }
+      sum.append(v, d, t);
+      const ul = document.createElement('ul');
+      for (const it of e.items) {
+        const li2 = document.createElement('li');
+        li2.textContent = it.text;
+        if (it.sub.length) {
+          const sub = document.createElement('ul');
+          for (const x of it.sub) { const l = document.createElement('li'); l.textContent = x; sub.append(l); }
+          li2.append(sub);
+        }
+        ul.append(li2);
+      }
+      det.append(sum, ul);
+      li.append(det);
+      ol.append(li);
+    });
+  }
+  $('vi-current').textContent = `紙飛行機シミュレーター v${VERSION}（${CHANGELOG[0].date.replace(/-/g, '/')}）`;
+  $('version-info').hidden = false;
+}
+
+function hideVersionInfo() { $('version-info').hidden = true; }
+
+$('version').onclick = showVersionInfo;
+$('menu-version').onclick = showVersionInfo;
+$('vi-close').onclick = hideVersionInfo;
+$('version-info').addEventListener('click', (e) => { if (e.target.id === 'version-info') hideVersionInfo(); });
+window.addEventListener('keydown', (e) => {
+  if (!$('version-info').hidden && e.key === 'Escape') { e.stopImmediatePropagation(); hideVersionInfo(); }
+}, true);
 $('aero-marker').onchange = () => { aeroMarker.visible = !!lastAero && $('aero-marker').checked; };
 updateTextures();
 resize();
@@ -1767,19 +2124,64 @@ renderSteps();
 drawCreasePattern();
 updateButtons();
 updateHint();
+
+// メインメニューと準備画面のボタン
+document.body.append($('ranking')); // メニューからも開けるよう、飛ばす画面の外に出す
+$('link-wings').checked = store.get('origami.linkWings', true);
+$('link-wings').onchange = (e) => store.set('origami.linkWings', e.target.checked);
+analysis = new Analysis({ renderer, canvas });
+resize();
+$('btn-analyze').onclick = enterAnalysis;
+$('an-back').onclick = exitAnalysis;
+$('an-again').onclick = () => { exitAnalysis(); flyAgain(); };
+$('an-refold').onclick = () => { exitAnalysis(); exitFly(); };
+$('an-play').onclick = toggleAnalysisPlay;
+$('an-time').oninput = (e) => { an.playing = false; $('an-play').textContent = '▶'; setAnalysisTime(+e.target.value); };
+$('an-time').onchange = (e) => setAnalysisTime(+e.target.value, true);
+for (const cb of document.querySelectorAll('#analysis [data-show]')) {
+  cb.onchange = () => analysis.setShow(cb.dataset.show, cb.checked);
+}
+$('btn-menu').onclick = showMenu;
+$('menu-fold').onclick = leaveMenu;
+$('menu-quick').onclick = () => {
+  const box = $('menu-presets');
+  box.innerHTML = '';
+  for (const p of PRESETS) {
+    const b = document.createElement('button');
+    b.textContent = p.name;
+    b.onclick = () => { loadPresetInstant(p); leaveMenu(); openBrief(); };
+    box.append(b);
+  }
+  box.hidden = !box.hidden;
+};
+$('menu-ranking').onclick = () => toggleRanking(true);
+$('menu-howto').onclick = () => { $('howto').hidden = false; };
+$('howto-close').onclick = () => { $('howto').hidden = true; };
+$('menu-wind').onclick = () => { course.setWindEnabled(!course.windEnabled); updateMenu(); };
+$('brief-go').onclick = goCourse;
+$('ld-start').onclick = finishLoading;
+$('tip-next').onclick = () => showTip(loading.i + 1);
+$('tip-prev').onclick = () => showTip(loading.i - 1);
+$('brief-back').onclick = closeBrief;
 loop();
+showMenu();
 
 // デバッグ・テスト用
 window.__origami = {
   get state() { return state; },
   get busy() { return busy; },
   get aero() { return lastAero; },
-  get flight() { return lastFlight; },
   get mode() { return mode; },
   records,
   course,
   enterFly,
   exitFly,
+  showMenu,
+  openBrief,
+  goCourse,
+  get loading() { return loading; },
+  enterAnalysis,
+  get analysis() { return analysis; },
   playPreset: (id) => playPreset(PRESETS.find((p) => p.id === id)),
   bgm,
   setView,

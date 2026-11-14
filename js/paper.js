@@ -543,7 +543,7 @@ export function creaseSegmentsXY(state) {
   return out;
 }
 
-// ---------------------------------------------------------------- 袋を開いてつぶす・中割り折り
+// ---------------------------------------------------------------- 中割り折り
 
 function splitAll(state, line) {
   const pieces = [];
@@ -556,25 +556,10 @@ function splitAll(state, line) {
   return pieces;
 }
 
-function lineIntersect(l1, l2) {
-  const den = cross2(l1.d.x, l1.d.y, l2.d.x, l2.d.y);
-  if (Math.abs(den) < 1e-9) return null;
-  const t = cross2(l2.p.x - l1.p.x, l2.p.y - l1.p.y, l2.d.x, l2.d.y) / den;
-  return { x: l1.p.x + l1.d.x * t, y: l1.p.y + l1.d.y * t };
-}
-
 const reflectVerts = (verts, line) => verts.map((v) => {
   const r = reflectPoint(line, v);
   return { x: r.x, y: r.y, u: v.u, v: v.v };
 });
-
-function centroid(face) {
-  const n = face.verts.length;
-  return {
-    x: face.verts.reduce((s, v) => s + v.x, 0) / n,
-    y: face.verts.reduce((s, v) => s + v.y, 0) / n,
-  };
-}
 
 // 選んだ部分以外の分割をやめて、面の一覧を作る
 function assemble(state, pieces, moving) {
@@ -605,96 +590,6 @@ function finish(state, faces, newSteps) {
 const stepFor = (line, k, extra) => ({
   kind: 'fold', p: { ...line.p }, d: { ...line.d }, k, angle: 180, ...extra,
 });
-
-/**
- * 袋を開いてつぶす（つぶし折り）。
- * line: 袋（2 枚重なったフラップ）のつけ根の線。side: 袋のある側。pick: 袋の上の点。
- * 袋の背（2 枚をつなぐ折り目）が、つけ根の線の上に来るように開いてつぶす。
- */
-export function squash(state, { line, side, pick }) {
-  if (!line) return { error: '線が短すぎます' };
-  const pieces = splitAll(state, line);
-  const candidates = pieces.filter((p) => p.side === side);
-  const sel = selectComponent(candidates, pick, { excludeLine: line });
-  if (sel.error) return sel;
-  const flap = [...sel.set];
-  const up1 = isFrontUp(sel.seed.face);
-  const L1 = flap.filter((p) => isFrontUp(p.face) === up1); // 上の 1 枚（反対側へ開く）
-  const L2 = flap.filter((p) => isFrontUp(p.face) !== up1); // 下の 1 枚（その場に残る）
-  if (!L2.length) return { error: '袋になっていません（2 枚が折り目でつながった部分を選んでください）' };
-
-  // 袋の背（L1 と L2 をつなぐ折り目）
-  let spine = null;
-  for (const a of L1) {
-    for (const b of L2) {
-      const e = sharedEdge(a.face, b.face);
-      if (e && !(onLine(line, e[0]) && onLine(line, e[1]))) { spine = e; break; }
-    }
-    if (spine) break;
-  }
-  if (!spine) return { error: '袋の背（2 枚をつなぐ折り目）が見つかりません' };
-  const spineLine = makeLine(spine[0], spine[1]);
-  const O = lineIntersect(spineLine, line);
-  if (!O) return { error: '袋の背とつけ根が平行なので、つぶせません' };
-  const far = Math.hypot(spine[0].x - O.x, spine[0].y - O.y) > Math.hypot(spine[1].x - O.x, spine[1].y - O.y) ? spine[0] : spine[1];
-  const sl = Math.hypot(far.x - O.x, far.y - O.y);
-  const s = { x: (far.x - O.x) / sl, y: (far.y - O.y) / sl };
-  // 袋の内側の角（背とつけ根の間）を二等分する線
-  const c = flap.reduce((acc, p) => { const q = centroid(p.face); return { x: acc.x + q.x, y: acc.y + q.y }; }, { x: 0, y: 0 });
-  c.x = c.x / flap.length - O.x; c.y = c.y / flap.length - O.y;
-  let d = null;
-  for (const sg of [1, -1]) {
-    const dd = { x: line.d.x * sg, y: line.d.y * sg };
-    const w = cross2(s.x, s.y, dd.x, dd.y);
-    if (Math.abs(w) < 1e-9) continue;
-    if (Math.sign(cross2(s.x, s.y, c.x, c.y)) === Math.sign(w) && Math.sign(cross2(c.x, c.y, dd.x, dd.y)) === Math.sign(w)) d = dd;
-  }
-  if (!d) return { error: '袋の向きがわかりません' };
-  const bl = Math.hypot(s.x + d.x, s.y + d.y);
-  if (bl < 1e-6) return { error: 'この袋はつぶせません' };
-  const bis = { p: O, d: { x: (s.x + d.x) / bl, y: (s.y + d.y) / bl } };
-  const spineSide = Math.sign(sideOf(bis, { x: O.x + s.x, y: O.y + s.y }));
-
-  const base = state.steps.length;
-  const iA = base; // 下の 1 枚の背側を二等分線で折る
-  const iB = base + 1; // 上の 1 枚の背側を二等分線で折る
-  const iC = base + 2; // 上の 1 枚をつけ根で反対側へ
-  const faces = assemble(state, pieces, sel.set);
-  const maxAll = Math.max(...state.faces.map((f) => f.layer));
-  const lay = (arr) => ({ max: Math.max(...arr.map((p) => p.face.layer)) });
-  const m1 = lay(L1).max;
-  const m2 = lay(L2).max;
-  for (const p of flap) {
-    const inL1 = L1.includes(p);
-    const { pos, neg } = splitFace(p.face, bis);
-    for (const [part, sgn] of [[pos, 1], [neg, -1]]) {
-      if (!part) continue;
-      const isSpine = sgn === spineSide;
-      let verts = part.verts.map((v) => ({ ...v }));
-      const moves = [...p.face.moves];
-      let layer = part.layer;
-      if (isSpine) {
-        verts = reflectVerts(verts, bis);
-        moves.push(inL1 ? iB : iA);
-      }
-      if (inL1) {
-        verts = reflectVerts(verts, line);
-        moves.push(iC);
-        layer = maxAll + (isSpine ? 200 : 100) + (m1 - part.layer);
-      } else if (isSpine) {
-        layer = maxAll + 300 + (m2 - part.layer);
-      }
-      faces.push({ id: null, verts, layer, moves });
-    }
-  }
-  const g = `squash-${base}`;
-  const steps = [
-    stepFor(bis, { x: bis.d.x * spineSide, y: bis.d.y * spineSide }, { type: 'squash', group: g, label: '袋を開いてつぶす' }),
-    stepFor(bis, { x: bis.d.x * spineSide, y: bis.d.y * spineSide }, { type: 'squash', group: g }),
-    stepFor(line, { x: line.d.x * side, y: line.d.y * side }, { type: 'squash', group: g }),
-  ];
-  return finish(state, faces, steps);
-}
 
 /**
  * 中割り折り（袋の先を、折り線で内側に折り込む）。
@@ -750,203 +645,6 @@ export function reverseFold(state, { line, side, pick }) {
   ];
   const r = finish(state, faces, steps);
   if (checkConnectivity(r.state, 2e-3).length) return { error: 'この位置では中割り折りできません（紙が破れてしまいます）' };
-  return r;
-}
-
-/**
- * 花弁折り。
- * line: 花弁の付け根になる横の線（両端が袋の左右のふちに乗るように引く）。
- * side: 持ち上げる側。pick: 持ち上げる 1 枚の上の点。
- * 1 枚目の真ん中を線で持ち上げ、左右はカイト線で内側に折り込む。
- * 1 枚目と折り目でつながっている下の紙も、カイト線で内側に折れる。
- */
-export function petalFold(state, opts) {
-  const { line, side, pick } = opts;
-  if (!line) return { error: '線が短すぎます' };
-  // 正しい花弁の線（カイト線がふちに当たる 2 点を結ぶ線）を求め、引いた線が近ければそちらを使う
-  if (!opts.exact) {
-    const ideal = idealPetalLine(state, line, side, pick);
-    if (ideal) {
-      const near = Math.max(Math.abs(sideOf(line, ideal.a)), Math.abs(sideOf(line, ideal.b)));
-      if (near < 0.15) {
-        const l2 = makeLine(ideal.a, ideal.b);
-        // 向きを引いた線にそろえる（side の符号を保つため）
-        if (l2.d.x * line.d.x + l2.d.y * line.d.y < 0) { l2.d.x *= -1; l2.d.y *= -1; }
-        return petalFold(state, { ...opts, line: l2, exact: true });
-      }
-    }
-  }
-  return petalCore(state, { line, side, pick });
-}
-
-// 選んだ 1 枚（袋の 1 枚目）について、角 O から出るカイト線がふちに当たる 2 点を求める
-function idealPetalLine(state, line, side, pick) {
-  const pieces = splitAll(state, line);
-  const candidates = pieces.filter((p) => p.side === side);
-  const sel = selectComponent(candidates, pick, { excludeLine: line, flatOnly: true });
-  if (sel.error) return null;
-  const F = [...sel.set];
-  let O = null;
-  let far = -1;
-  for (const p of F) for (const v of p.face.verts) { const d = Math.abs(sideOf(line, v)); if (d > far) { far = d; O = v; } }
-  if (!O) return null;
-  // 1 枚目の面（分ける前）と、その外周の辺
-  const src = [...new Set(F.map((p) => state.faces[p.src]))];
-  const edges = [];
-  for (const f of src) {
-    const vs = f.verts;
-    for (let i = 0; i < vs.length; i++) {
-      const a = vs[i];
-      const b = vs[(i + 1) % vs.length];
-      const inner = src.some((g) => g !== f && g.verts.some((c, j) => edgesOverlapUV(a, b, c, g.verts[(j + 1) % g.verts.length])));
-      if (!inner) edges.push([a, b]);
-    }
-  }
-  const same = (p, q) => Math.hypot(p.x - q.x, p.y - q.y) < 1e-7;
-  const atO = edges.filter(([a, b]) => same(a, O) || same(b, O)).map(([a, b]) => (same(a, O) ? b : a));
-  if (atO.length !== 2) return null;
-  const unit = (q) => { const dx = q.x - O.x, dy = q.y - O.y, L = Math.hypot(dx, dy); return { x: dx / L, y: dy / L }; };
-  const e1 = unit(atO[0]);
-  const e2 = unit(atO[1]);
-  const cl = Math.hypot(e1.x + e2.x, e1.y + e2.y);
-  if (cl < 1e-9) return null;
-  const c = { x: (e1.x + e2.x) / cl, y: (e1.y + e2.y) / cl };
-  const hit = (e) => {
-    const kl = Math.hypot(e.x + c.x, e.y + c.y);
-    const d = { x: (e.x + c.x) / kl, y: (e.y + c.y) / kl };
-    let best = null;
-    for (const [a, b] of edges) {
-      if (same(a, O) || same(b, O)) continue;
-      const sx = b.x - a.x, sy = b.y - a.y;
-      const den = cross2(d.x, d.y, sx, sy);
-      if (Math.abs(den) < 1e-12) continue;
-      const t = cross2(a.x - O.x, a.y - O.y, sx, sy) / den;
-      const u = cross2(a.x - O.x, a.y - O.y, d.x, d.y) / den;
-      if (t > 1e-6 && u > -1e-9 && u < 1 + 1e-9 && (!best || t < best.t)) best = { t, x: O.x + d.x * t, y: O.y + d.y * t };
-    }
-    return best;
-  };
-  const a = hit(e1);
-  const b = hit(e2);
-  return a && b ? { a, b } : null;
-}
-
-function petalCore(state, { line, side, pick }) {
-  const pieces = splitAll(state, line);
-  const candidates = pieces.filter((p) => p.side === side);
-  const sel = selectComponent(candidates, pick, { excludeLine: line, flatOnly: true });
-  if (sel.error) return sel;
-  const F = [...sel.set];
-  // 持ち上げる角（線から一番遠い点）と、線と 1 枚目のふちの交点
-  let O = null;
-  let far = -1;
-  let tmin = Infinity;
-  let tmax = -Infinity;
-  for (const p of F) {
-    for (const v of p.face.verts) {
-      const d = Math.abs(sideOf(line, v));
-      if (d > far) { far = d; O = v; }
-      if (d < 1e-7) {
-        const t = (v.x - line.p.x) * line.d.x + (v.y - line.p.y) * line.d.y;
-        tmin = Math.min(tmin, t); tmax = Math.max(tmax, t);
-      }
-    }
-  }
-  if (!O || tmax - tmin < 1e-6) return { error: '花弁折りの線が、選んだ紙を横切っていません' };
-  const KL = { x: line.p.x + line.d.x * tmin, y: line.p.y + line.d.y * tmin };
-  const KR = { x: line.p.x + line.d.x * tmax, y: line.p.y + line.d.y * tmax };
-  const kites = [makeLine(O, KL), makeLine(O, KR)];
-  if (!kites[0] || !kites[1]) return { error: '花弁折りの形になっていません' };
-  // それぞれのカイト線について、O から見て「外側」の符号
-  const outer = kites.map((k, i) => Math.sign(sideOf(k, i === 0 ? KR : KL)) * -1);
-
-  const base = state.steps.length;
-  const iK = [base, base + 1];
-  const iH = base + 2;
-  const maxAll = Math.max(...state.faces.map((f) => f.layer));
-  const moving = new Set(F);
-  const out = [];
-  const pushPart = (part, moves, layer, verts) => out.push({ id: null, verts, layer, moves });
-
-  // 1 枚目：真ん中は線で、左右はカイト線で折ってから線で
-  const maxF = Math.max(...F.map((p) => p.face.layer));
-  for (const p of F) {
-    let parts = [{ face: p.face, kite: -1 }];
-    for (let i = 0; i < 2; i++) {
-      const next = [];
-      for (const q of parts) {
-        if (q.kite >= 0) { next.push(q); continue; }
-        const { pos, neg } = splitFace(q.face, kites[i]);
-        if (pos) next.push({ face: pos, kite: outer[i] === 1 ? i : -1 });
-        if (neg) next.push({ face: neg, kite: outer[i] === -1 ? i : -1 });
-      }
-      parts = next;
-    }
-    for (const q of parts) {
-      let verts = q.face.verts.map((v) => ({ ...v }));
-      const moves = [...p.face.moves];
-      if (q.kite >= 0) { verts = reflectVerts(verts, kites[q.kite]); moves.push(iK[q.kite]); }
-      verts = reflectVerts(verts, line);
-      moves.push(iH);
-      // 左右は真ん中の後ろに回り込み、持ち上げると真ん中の前に来る
-      const layer = maxAll + (q.kite >= 0 ? 200 : 100) + (maxF - p.face.layer);
-      pushPart(q, moves, layer, verts);
-    }
-  }
-  // 1 枚目と、ふち（折り目）でつながっている下の紙のカイト部分
-  const partners = [];
-  for (const c of candidates) {
-    if (moving.has(c)) continue;
-    for (const p of F) {
-      const e = sharedEdge(p.face, c.face);
-      if (!e) continue;
-      if (onLine(line, e[0]) && onLine(line, e[1])) continue;
-      if (kites.some((k) => onLine(k, e[0]) && onLine(k, e[1]))) continue;
-      partners.push(c);
-      break;
-    }
-  }
-  const partnerParts = [];
-  for (const c of partners) {
-    moving.add(c);
-    // どちら側のカイト線に近いか
-    const cc = centroid(c.face);
-    const i = Math.abs(sideOf(kites[0], cc)) < Math.abs(sideOf(kites[1], cc)) ? 0 : 1;
-    const { pos, neg } = splitFace(c.face, kites[i]);
-    for (const [part, sg] of [[pos, 1], [neg, -1]]) {
-      if (!part) continue;
-      if (sg === outer[i]) {
-        partnerParts.push({ part, i, c });
-      } else {
-        out.push({ id: null, verts: part.verts.map((v) => ({ ...v })), layer: part.layer, moves: [...c.face.moves] });
-      }
-    }
-  }
-  const maxP = partnerParts.length ? Math.max(...partnerParts.map((q) => q.c.face.layer)) : 0;
-  for (const q of partnerParts) {
-    out.push({
-      id: null,
-      verts: reflectVerts(q.part.verts, kites[q.i]),
-      layer: maxAll + 50 + (maxP - q.c.face.layer),
-      moves: [...q.c.face.moves, iK[q.i]],
-    });
-  }
-  const faces = [...assemble(state, pieces, moving), ...out];
-  const g = `petal-${base}`;
-  const kStep = (i) => {
-    const sd = -outer[i]; // 左右は奥へ回り込む
-    return stepFor(kites[i], { x: kites[i].d.x * sd, y: kites[i].d.y * sd }, { type: 'petal', group: g });
-  };
-  const steps = [
-    { ...kStep(0), label: '花弁折り' },
-    kStep(1),
-    stepFor(line, { x: line.d.x * side, y: line.d.y * side }, { type: 'petal', group: g }),
-  ];
-  const r = finish(state, faces, steps);
-  // 手で引いた線は少しずれるので、目に見えない程度のずれは許す
-  if (checkConnectivity(r.state, 2e-3).length) {
-    return { error: 'この線では花弁折りできません。袋の左右のふちの、カイト線が当たる点どうしを結んでください', torn: r.state };
-  }
   return r;
 }
 
@@ -1077,6 +775,15 @@ function applyStep(step, P, angle) {
   return rotateAboutAxis(P, step.p, step.k, (angle - 180) * DEG);
 }
 
+// 紙全体を動かす手順（裏返す・回す）
+const isRigid = (step) => step.kind === 'rotate' || step.type === 'flip';
+
+// 動かす前の位置 P に、紙全体の動きを角度 angle だけかける
+function applyRigid(step, P, angle) {
+  if (step.kind === 'rotate') return rotateAboutZ(P, step.c, angle * DEG);
+  return rotateAboutAxis(P, step.p, step.k, angle * DEG);
+}
+
 // 平らな状態の座標を、各手順の角度に応じた 3D 座標に変換する
 // angles: 手順ごとの角度（省略時は step.angle）
 export function poseFaces(state, angles) {
@@ -1091,14 +798,29 @@ export function poseFaces(state, angles) {
   return state.faces.map((face) => {
     const pts = face.verts.map((v) => {
       let P = [v.x, v.y, 0];
+      // 裏返す・回すは紙全体を動かすので、それより前の手順の折り目もいっしょに動く。
+      // そこで、いったん動かす前の位置に戻してから前の手順を開き、最後に（外側で）動かし直す
+      const outer = [];
       for (let i = face.moves.length - 1; i >= 0; i--) {
         const si = face.moves[i];
         const step = steps[si];
         const a = angles ? angles[si] : step.angle;
         const full = step.kind === 'rotate' ? step.full : 180;
+        if (isRigid(step)) {
+          P = applyStep(step, P, 0); // 動かす前の位置へ
+          outer.push([step, a]);
+          continue;
+        }
         if (a !== full) P = applyStep(step, P, a);
       }
-      P[2] += (face.hist?.[done] ?? face.layer) * LAYER_GAP;
+      // 重なりのすき間は、紙全体を動かす前の向きでつける（裏返すと上下が逆になる）
+      const flips = outer.filter(([st]) => st.type === 'flip' && steps.indexOf(st) < done).length;
+      P[2] += (face.hist?.[done] ?? face.layer) * LAYER_GAP * (flips % 2 ? -1 : 1);
+      // 前の手順から順に、紙全体の動きをかけ直す
+      for (let i = outer.length - 1; i >= 0; i--) {
+        const [step, a] = outer[i];
+        P = applyRigid(step, P, a);
+      }
       return P;
     });
     return { face, pts };
@@ -1179,6 +901,27 @@ export function snapPoints(state) {
     }
   }
   return pts;
+}
+
+// 左右の翼のように、同じ折り線で続けて折った「対」の手順を見つける（開き具合を連動させるため）
+// 戻り値: 手順の添字 → 相手の添字 の Map
+export function pairedSteps(steps, tol = 1e-6) {
+  const pairs = new Map();
+  for (let i = 0; i + 1 < steps.length; i++) {
+    const a = steps[i];
+    const b = steps[i + 1];
+    if (pairs.has(i)) continue;
+    if (a.kind !== 'fold' || b.kind !== 'fold' || a.type === 'flip' || b.type === 'flip') continue;
+    if (a.group || b.group) continue; // 中割り折りなどの、もともと一緒に動く手順は別扱い
+    if (a.mode !== 'component' || b.mode !== 'component') continue;
+    // 同じ直線（平行で、b の点が a の線の上）
+    const cross = a.d.x * b.d.y - a.d.y * b.d.x;
+    const off = a.d.x * (b.p.y - a.p.y) - a.d.y * (b.p.x - a.p.x);
+    if (Math.abs(cross) > tol || Math.abs(off) > 1e-4) continue;
+    pairs.set(i, i + 1);
+    pairs.set(i + 1, i);
+  }
+  return pairs;
 }
 
 export function totalArea(state) {
