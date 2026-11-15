@@ -133,10 +133,10 @@ export function traceStreamlines(model, seeds, { step = 0.01, length = 1.2 } = {
 }
 
 /**
- * 投げた結果を読み解いて、飛距離が伸びなかった理由と、直すコツを挙げる
+ * 投げた結果を読み解いて、飛距離が伸びなかった理由（起きたこと）を挙げる。直し方は書かない（遊ぶ人が考える）
  * @param flight simulateThrow の結果（swing, wind があれば使う）
  * @param aero analyzeAirplane の結果
- * @returns {{ findings: [{ level, title, text, fix }], stats }} level は 'good' | 'warn' | 'bad'
+ * @returns {{ findings: [{ level, title, text }], stats }} level は 'good' | 'warn' | 'bad'
  */
 export function diagnose(flight, aero) {
   const af = makeAirframe(aero);
@@ -176,41 +176,44 @@ export function diagnose(flight, aero) {
     bestLD: bestGlide(af),
   };
   const out = [];
-  const add = (level, title, text, fix) => out.push({ level, title, text, fix });
+  const add = (level, title, text) => out.push({ level, title, text });
 
   if (!af.hasWing || aero.wingArea * 1e4 < 5) {
-    add('bad', '翼がほとんどない', '真上から見た翼の面積がとても小さく、揚力が出ません。', '翼を広げる（翼のスライダーを小さくする）か、翼の広い折り方にしよう。');
+    add('bad', '翼がほとんどない', `真上から見た翼の面積は ${(aero.wingArea * 1e4).toFixed(1)} cm² で、揚力がほとんど出ません。`);
   }
+  // 重心と空力中心の位置（事実として添える）
+  const balance = aero.staticMargin < 0
+    ? '重心が空力中心より後ろにあります。'
+    : aero.staticMargin > 0.25 ? '重心が空力中心よりかなり前にあります。' : '';
   if (stats.stallFraction > 0.15) {
-    add('bad', '失速している', `飛んでいる時間の ${Math.round(stats.stallFraction * 100)}% で、迎え角が失速角（約 ${Math.round(stallA / RAD)}°）を超えて、揚力が落ちています。`,
-      aero.staticMargin < 0 ? '重心が後ろすぎます。先を少し重くする（先を折り込む）と安定します。' : '強く投げすぎか、上向きに投げすぎです。強さや角度を少し下げよう。後ろのふちを上げすぎていたら戻そう。');
+    add('bad', '失速している', `飛んでいる時間の ${Math.round(stats.stallFraction * 100)}% で、迎え角が失速角（約 ${Math.round(stallA / RAD)}°）を超えて、揚力が落ちています。${stats.maxAlpha > 60 ? '機体が宙返りするほど大きく回っています。' : `最大の迎え角は ${stats.maxAlpha.toFixed(0)}°。`}${balance}`);
   } else if (stats.stallFraction > 0) {
-    add('warn', '一瞬だけ失速', '投げた直後などに、迎え角が大きくなりすぎた瞬間がありました。', '投げる角度を少し下げると、なめらかに飛び出せます。');
+    add('warn', '一瞬だけ失速', `迎え角が失速角（約 ${Math.round(stallA / RAD)}°）を超えた瞬間がありました${stats.maxAlpha > 60 ? '' : `（最大 ${stats.maxAlpha.toFixed(0)}°）`}。`);
   }
   if (stats.diveFraction > 0.3) {
-    add('bad', '急降下している', '機首が大きく下を向いたまま落ちています。', aero.staticMargin > 0.25 ? '機首が重すぎます。翼の後ろのふちを少し上げる（昇降舵）と、機首が上がって滑空します。' : '翼の後ろのふちを少し上げてみよう。');
+    add('bad', '急降下している', `飛んでいる時間の ${Math.round(stats.diveFraction * 100)}% で、25° より急な角度で落ちています。${balance}`);
   }
   if (aero.dihedral < -5) {
-    add('warn', '翼が下向き（下反角）', `翼が ${Math.abs(aero.dihedral).toFixed(0)}° 下がっていて、傾くとそのまま傾き続けやすい形です。`, '翼のスライダーを少し小さくして、翼を水平〜少し上向きにしよう。');
+    add('warn', '翼が下向き（下反角）', `翼が ${Math.abs(aero.dihedral).toFixed(0)}° 下がっていて、傾くとそのまま傾き続けやすい形です。`);
   }
   if (aero.symmetry < 0.95 || Math.abs(aero.rollTrim) > 0.001) {
-    add('warn', '左右がそろっていない', '左右の翼の形や角度がずれていて、片側に曲がる力がはたらきます。', '「左右の翼をいっしょに動かす」をオンにして、左右の開き具合をそろえよう。');
+    add('warn', '左右がそろっていない', `平面形の左右対称性は ${Math.round(aero.symmetry * 100)}%。左右の翼の形や角度がずれていて、片側に曲がる力がはたらきます。`);
   }
   if (Math.abs(flight.lateral ?? 0) > Math.max(1, flight.distance * 0.15)) {
     const sw = flight.swing;
     const by = sw && sw.grade !== 'just' ? '投げるタイミングのずれ' : flight.wind && flight.wind.speed > 0.5 ? '横風' : '機体の左右差';
-    add('warn', `${flight.lateral > 0 ? '左' : '右'}へ ${Math.abs(flight.lateral).toFixed(1)} m 曲がった`, `おもな原因は、${by}です。曲がったぶん、まっすぐの距離が短くなっています。`, by === '横風' ? '風上へ少し向きを変えて投げよう（←→）。' : by.startsWith('投げる') ? '3 回目のボタンを白い「ジャスト」に合わせよう。' : '左右の翼の開き具合をそろえよう。');
+    add('warn', `${flight.lateral > 0 ? '左' : '右'}へ ${Math.abs(flight.lateral).toFixed(1)} m 曲がった`, `おもな原因は、${by}です。曲がったぶん、まっすぐの距離が短くなっています。`);
   }
   if (flight.wind && flight.wind.speed >= 0.8) {
     const head = -Math.cos(flight.wind.dir - (flight.yaw ?? 0) * RAD) * flight.wind.speed;
-    if (head > 0.8) add('warn', '向かい風', `${head.toFixed(1)} m/s の向かい風で、空気に対する速さは出ても、地面に対しては進みにくくなっていました。`, '向かい風では、低めの角度で強めに投げよう。');
-    else if (head < -0.8) add('good', '追い風', `${(-head).toFixed(1)} m/s の追い風に乗りました。`, '追い風のときは、少し高めに投げると長く風に乗れます。');
+    if (head > 0.8) add('warn', '向かい風', `${head.toFixed(1)} m/s の向かい風で、空気に対する速さは出ても、地面に対しては進みにくくなっていました。`);
+    else if (head < -0.8) add('good', '追い風', `${(-head).toFixed(1)} m/s の追い風に乗りました。`);
   }
   if (stats.meanLD > 0 && stats.bestLD > 0 && stats.meanLD < stats.bestLD * 0.6 && stats.stallFraction < 0.15) {
-    add('warn', '効率のよい迎え角で飛べていない', `平均の揚抗比は ${stats.meanLD.toFixed(1)}（この機体の最高は ${stats.bestLD.toFixed(1)}）。迎え角が小さすぎて、揚力をうまく使えていません。`, '翼の後ろのふちを少し上げると、迎え角が増えて、ゆっくり長く滑空します。');
+    add('warn', '効率のよい迎え角で飛べていない', `平均の揚抗比は ${stats.meanLD.toFixed(1)}（この機体の最高は ${stats.bestLD.toFixed(1)}）。迎え角が小さく、揚力をうまく使えていません。`);
   }
   if (!out.some((f) => f.level !== 'good')) {
-    add('good', 'きれいに飛べた', '失速も急降下もなく、安定して飛びました。', 'もっと遠くへは、翼を広く・軽くするか、ジャストで強めに投げよう。');
+    add('good', 'きれいに飛べた', '失速も急降下もなく、安定して飛びました。');
   }
   return { findings: out, stats };
 }

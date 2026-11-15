@@ -1658,8 +1658,7 @@ function renderDiagnosis(d) {
     li.className = f.level;
     const b = document.createElement('b'); b.textContent = f.title;
     const p = document.createElement('span'); p.textContent = f.text;
-    const fix = document.createElement('span'); fix.className = 'fix'; fix.textContent = f.fix;
-    li.append(b, p, fix);
+    li.append(b, p);
     ul.append(li);
   }
   const st = d.stats;
