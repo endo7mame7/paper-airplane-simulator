@@ -66,16 +66,32 @@
           <p class="muted small">記録はこのブラウザの中だけに保存されます。</p>
         </div>
         <div id="fly-result" hidden>
-          <div class="label">飛距離</div>
-          <div id="fly-result-dist" class="big"></div>
-          <div id="fly-result-rank" class="rank"></div>
-          <div id="fly-result-grade" class="grade"></div>
-          <div id="fly-result-sub" class="small"></div>
-          <div class="row">
+          <button id="btn-result-min" class="min" title="たたむ / ひらく (H)">▾</button>
+          <div class="res-main">
+            <div class="res-dist"><span class="label">飛距離</span> <span id="fly-result-dist" class="big"></span></div>
+            <div class="res-info">
+              <div id="fly-result-rank" class="rank"></div>
+              <div id="fly-result-grade" class="grade"></div>
+              <div id="fly-result-sub" class="small"></div>
+            </div>
+          </div>
+          <div class="row res-btns">
+            <button id="btn-replay" title="もう一度見る (P)">▶ リプレイ</button>
             <button id="btn-again" class="primary">もう一度投げる</button>
             <button id="btn-analyze" title="空気の流れと飛び方を分析する (A)">🔬 分析</button>
             <button id="btn-refold-plane">折り直す</button>
           </div>
+        </div>
+        <div id="replay-bar" hidden>
+          <span class="rp-label">▶ リプレイ</span>
+          <span class="rp-speed" role="group" aria-label="再生の速さ">
+            <button data-speed="1" class="on">×1</button>
+            <button data-speed="0.5">×½</button>
+            <button data-speed="0.25">×¼</button>
+          </span>
+          <button id="rp-view" title="カメラを切り替える (C)">🎥</button>
+          <button id="rp-again" title="最初から (P)">↺ 最初から</button>
+          <button id="rp-stop" title="終わる (Space / Esc)">■ 終わる</button>
         </div>
         <div id="fly-controls">
           <div class="ctl">
@@ -301,23 +317,29 @@
         <div class="an-note" id="an-note"></div>
       </div>
       <div class="an-btns">
+        <button id="an-help" title="この画面の見方 (?)">？ 見方</button>
         <button id="an-back" title="結果に戻る (Esc)">← 結果に戻る</button>
         <button id="an-again" class="primary">もう一度投げる</button>
         <button id="an-refold">✎ 折り直す</button>
       </div>
     </div>
-    <aside class="an-side">
-      <h3>診断</h3>
-      <ul id="an-findings"></ul>
-      <h3>この 1 投</h3>
-      <dl id="an-stats" class="stats"></dl>
+    <aside class="an-side an-panel" id="an-side">
+      <div class="an-head"><h3>診断</h3><button class="an-fold" data-fold="an-side" title="たたむ / ひらく (D)">－</button></div>
+      <div class="an-body">
+        <ul id="an-findings"></ul>
+        <h3>この 1 投</h3>
+        <dl id="an-stats" class="stats"></dl>
+      </div>
     </aside>
-    <div class="an-legend">
+    <div class="an-legend an-panel" id="an-legend">
+      <div class="an-head"><h3>表示</h3><button class="an-fold" data-fold="an-legend" title="たたむ / ひらく (L)">－</button></div>
+      <div class="an-body">
       <div class="an-toggles">
         <label><input type="checkbox" data-show="flow" checked> 流れ</label>
         <label><input type="checkbox" data-show="vortex" checked> 翼端うず</label>
         <label><input type="checkbox" data-show="pressure" checked> 翼の圧力</label>
         <label><input type="checkbox" data-show="forces" checked> 力の矢印</label>
+        <label><input type="checkbox" data-show="labels" checked> 名前の文字</label>
       </div>
       <div class="bar-title">流れの速さ（周りの空気に対して）</div>
       <div class="cbar speed"></div>
@@ -326,14 +348,76 @@
       <div class="cbar press"></div>
       <div class="cbar-l"><span>低い（吸い上げ）</span><span>高い（押し上げ）</span></div>
       <p class="small an-hint">ドラッグで回す・ホイールで拡大</p>
+      </div>
     </div>
-    <div class="an-bottom">
+    <div id="an-guide" hidden>
+      <div class="ag-box" role="dialog" aria-labelledby="ag-title">
+        <div class="ag-head">
+          <h2 id="ag-title">分析モードの見方</h2>
+          <button id="ag-close" title="閉じる (Esc)">✕</button>
+        </div>
+        <div class="ag-body">
+          <p class="ag-lead">紙飛行機を<b>風洞</b>（前から空気が流れてくる部屋）に止めて、飛んでいる途中のある瞬間の空気の様子を見ています。どの瞬間かは、下のスライダーで選べます。</p>
+
+          <h3>まずはこの順に見よう</h3>
+          <ol class="ag-steps">
+            <li><b>左の「診断」</b>を読む。飛距離が伸びなかった理由と、💡 直し方が書いてあります。</li>
+            <li><b>下のグラフ</b>で、失速した所（赤）や急に落ちた所を探す。</li>
+            <li><b>スライダー</b>をその時刻に動かして（▶ で再生も）、矢印と流れがどう変わるか見る。</li>
+            <li>「折り直す」で直して、もう一度投げて比べる。</li>
+          </ol>
+
+          <h3>矢印（力）</h3>
+          <ul class="ag-list">
+            <li><span class="chip" style="background:#4ade80"></span><b>緑＝揚力</b>：翼が紙飛行機を持ち上げる力。</li>
+            <li><span class="chip" style="background:#e5e7eb"></span><b>白＝重さ</b>：下に引っぱる力。</li>
+            <li><span class="chip" style="background:#f87171"></span><b>赤＝抗力</b>：空気が後ろに引っぱる力（ブレーキ）。</li>
+            <li><span class="chip" style="background:#93c5fd"></span><b>青＝相対風</b>：紙飛行機から見て、空気が流れてくる向き。</li>
+          </ul>
+          <p class="ag-tip">緑が白と同じくらい（上の数字「揚力 / 重さ」が 1 に近い）なら、水平に近く飛べています。緑が短いと落ちていく。<br>
+          「揚抗比」＝ 揚力 ÷ 抗力。大きいほど、少し下がるだけで遠くまで進めます（紙飛行機は 3〜6 くらい）。</p>
+
+          <h3>点（バランス）</h3>
+          <ul class="ag-list">
+            <li><span class="chip round" style="background:#38bdf8"></span><b>青い点＝重心</b>：重さの中心。</li>
+            <li><span class="chip round" style="background:#f97316"></span><b>オレンジの点＝空力中心</b>：揚力がはたらく中心。</li>
+          </ul>
+          <p class="ag-tip">青い点がオレンジの点より<b>少し前</b>にあると安定します。後ろにあると、機首が上がって失速しやすくなります。</p>
+
+          <h3>流れの線</h3>
+          <ul class="ag-list">
+            <li><span class="chip bar speed"></span>線は<b>空気の通り道</b>。粒が流れる向きに空気が動いています。</li>
+            <li>色は空気の<b>速さ</b>：周りより<b>速い所は黄〜赤</b>、<b>遅い所は青</b>。翼の上を速く流れるほど、翼は上に吸い上げられます。</li>
+            <li>翼の後ろで線が<b>下に曲がっている</b>のは、翼が空気を下へ押し下げた証拠。その反動が揚力です。</li>
+            <li><b>翼端うず</b>：翼の先で、空気が下から上へ回り込んで渦を巻きます。これはブレーキ（抗力）のもと。翼が細長いほど小さくなります。</li>
+          </ul>
+
+          <h3>翼の色（圧力）</h3>
+          <ul class="ag-list">
+            <li><span class="chip bar press"></span><b>青</b>＝圧力が低い（上から吸い上げられる）、<b>赤</b>＝圧力が高い（下から押し上げられる）。</li>
+            <li>翼の<b>前のふちが濃い青</b>なら、しっかり揚力が出ています。全体が白っぽいときは、揚力が小さい（迎え角が小さい）瞬間です。</li>
+          </ul>
+
+          <h3>下のグラフ</h3>
+          <ul class="ag-list">
+            <li><b>左：横から見た道すじ</b>。赤い所は失速していた所、黄色の点がいま見ている瞬間。</li>
+            <li><b>右：迎え角</b>（翼が空気に当たる角度）。赤い帯に入ると<b>失速</b>（揚力が急に落ちる）。帯に入らず、少し上向きで続くのが理想です。</li>
+          </ul>
+
+          <p class="ag-note">※ この画面は、揚力線理論という考え方で近似した図です。本物の流体計算（CFD）ではないので、だいたいの傾向として見てください。</p>
+        </div>
+        <div class="ag-foot"><button id="ag-ok" class="primary">わかった</button></div>
+      </div>
+    </div>
+
+    <div class="an-bottom an-panel" id="an-bottom">
       <div class="an-readout" id="an-readout"></div>
       <div class="an-timeline">
         <button id="an-play" title="再生 / 一時停止 (Space)">▶</button>
         <input type="range" id="an-time" min="0" max="1" step="0.01" value="0">
+        <button class="an-fold" data-fold="an-bottom" title="グラフをたたむ / ひらく (G)">📈</button>
       </div>
-      <canvas id="an-chart" width="900" height="150"></canvas>
+      <div class="an-body"><canvas id="an-chart" width="900" height="150"></canvas></div>
     </div>
   </div>
 

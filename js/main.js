@@ -1352,6 +1352,7 @@ function resize() {
   renderer.setSize(r.width, r.height, false);
   course.resize(r.width, r.height);
   analysis?.resize(r.width, r.height);
+  if (mode === 'analysis') fitAnalysisFrame();
   const prevAspect = camera.aspect;
   camera.aspect = r.width / Math.max(1, r.height);
   camera.updateProjectionMatrix();
@@ -1403,6 +1404,7 @@ let lastRecordId = null; // 最後に記録した 1 投
 const course = new Course({
   renderer, paperGeom, edgeGeom, frontMat, backMat,
   onLanded: (f) => showFlyResult(f),
+  onReplayEnd: () => endReplayUi(),
   onUpdate: (info) => updateFlyHud(info),
   onSwing: (sw) => showGrade(sw),
   onWind: () => updateWindHud(),
@@ -1593,6 +1595,50 @@ function enterAnalysis() {
   an.playing = false;
   $('an-play').textContent = '▶';
   setAnalysisTime(an.t, true);
+  // 狭い画面では、はじめから診断をたたんでおく
+  for (const id of ['an-side', 'an-legend']) {
+    $(id).classList.toggle('folded', window.innerWidth < 900);
+    $(id).querySelector('.an-fold').textContent = $(id).classList.contains('folded') ? '＋' : '－';
+  }
+  fitAnalysisFrame();
+  // はじめて分析モードを開いたときは、見方を出す
+  showAnalysisGuide(!store.get('origami.anGuideSeen', false));
+}
+
+// パネルに隠れない空き領域を求めて、3D をそこに合わせる
+function fitAnalysisFrame() {
+  const c = canvas.getBoundingClientRect();
+  const W = c.width, H = c.height;
+  let x0 = 0, x1 = W, y0 = 0, y1 = H;
+  const box = (id) => {
+    const el = $(id);
+    if (!el || getComputedStyle(el).display === 'none') return null;
+    const r = el.getBoundingClientRect();
+    return { l: r.left - c.left, r: r.right - c.left, t: r.top - c.top, b: r.bottom - c.top };
+  };
+  const top = document.querySelector('.an-top').getBoundingClientRect();
+  y0 = Math.max(y0, top.bottom - c.top + 6);
+  const bottom = box('an-bottom');
+  if (bottom) y1 = Math.min(y1, bottom.t - 6);
+  const side = box('an-side');
+  // 左のパネル：横に置いてあるときは左はしを、下に置いてある（狭い画面）ときは下はしを削る
+  if (side) {
+    if (side.r < W * 0.45 && side.b - side.t > (y1 - y0) * 0.4) x0 = Math.max(x0, side.r + 6);
+    else if (side.t > H * 0.4) y1 = Math.min(y1, side.t - 6);
+  }
+  const legend = box('an-legend');
+  if (legend && legend.l > W * 0.55 && legend.b - legend.t > (y1 - y0) * 0.4) x1 = Math.min(x1, legend.l - 6);
+  if (x1 - x0 < 160) { x0 = 0; x1 = W; }
+  if (y1 - y0 < 120) { y0 = 0; y1 = H; }
+  analysis.setFrame(W, H, { x: x0, y: y0, w: x1 - x0, h: y1 - y0 });
+}
+
+function toggleAnalysisPanel(id) {
+  const el = $(id);
+  el.classList.toggle('folded');
+  const b = el.querySelector('.an-fold');
+  if (id !== 'an-bottom') b.textContent = el.classList.contains('folded') ? '＋' : '－';
+  fitAnalysisFrame();
 }
 
 function exitAnalysis() {
@@ -1735,11 +1781,30 @@ function toggleAnalysisPlay() {
   if (!an.playing) setAnalysisTime(an.t, true);
 }
 
+function showAnalysisGuide(show = true) {
+  $('an-guide').hidden = !show;
+  if (show) {
+    an.playing = false;
+    $('an-play').textContent = '▶';
+    $('an-guide').querySelector('.ag-body').scrollTop = 0;
+  } else {
+    store.set('origami.anGuideSeen', true);
+  }
+}
+
 function analysisKeyDown(e) {
+  if (!$('an-guide').hidden) {
+    if (e.key === 'Escape' || e.key === 'Enter' || e.key === '?') { e.preventDefault(); showAnalysisGuide(false); }
+    return;
+  }
+  if (e.key === '?') { showAnalysisGuide(true); return; }
   if (e.key === 'Escape') exitAnalysis();
   else if (e.key === ' ') { e.preventDefault(); toggleAnalysisPlay(); }
   else if (e.key === 'ArrowRight') { e.preventDefault(); setAnalysisTime(an.t + 0.1, true); }
   else if (e.key === 'ArrowLeft') { e.preventDefault(); setAnalysisTime(an.t - 0.1, true); }
+  else if (e.key.toLowerCase() === 'd') toggleAnalysisPanel('an-side');
+  else if (e.key.toLowerCase() === 'l') toggleAnalysisPanel('an-legend');
+  else if (e.key.toLowerCase() === 'g') toggleAnalysisPanel('an-bottom');
 }
 
 // ================================================================ ローディング画面（準備画面 → コース）
@@ -1828,6 +1893,8 @@ function enterFly() {
   document.body.classList.add('fly');
   $('fly-hud').hidden = false;
   $('fly-result').hidden = true;
+  $('replay-bar').hidden = true;
+  toggleResultMin(false);
   $('btn-fly').textContent = '✎ 折る';
   controls.enabled = false;
   snapRing.visible = false;
@@ -1837,7 +1904,9 @@ function enterFly() {
 
 function exitFly() {
   mode = 'fold';
-  document.body.classList.remove('fly');
+  hideResult();
+  $('replay-bar').hidden = true;
+  document.body.classList.remove('fly', 'landed', 'replaying');
   $('fly-hud').hidden = true;
   $('btn-fly').textContent = '✈ 飛ばす';
   controls.enabled = true;
@@ -1878,9 +1947,13 @@ function updateFlyHud(info) {
   const sp = info.flight?.speed ?? (info.phase === 'power' || info.phase === 'impact' ? speedFromPower(pw) : null);
   $('fly-speed').textContent = sp ? `${sp.toFixed(1)} m/s` : '';
   $('btn-throw').textContent = THROW_LABEL[info.phase] ?? '振りかぶる';
-  const flying = info.phase === 'flying' || info.phase === 'landed';
+  const flying = info.phase === 'flying' || info.phase === 'landed' || info.phase === 'replay';
+  document.body.classList.toggle('landed', info.phase === 'landed');
+  document.body.classList.toggle('replaying', info.phase === 'replay');
   $('fly-dist').firstChild.textContent = (flying ? info.distance : 0).toFixed(2);
-  $('fly-sub').textContent = info.phase === 'flying'
+  $('fly-sub').textContent = info.phase === 'replay'
+    ? `リプレイ　${info.t.toFixed(1)} 秒・高さ ${info.height.toFixed(2)} m`
+    : info.phase === 'flying'
     ? `${info.t.toFixed(1)} 秒・高さ ${info.height.toFixed(2)} m（Space で飛ばす）`
     : info.phase === 'ready' ? 'ボタン（Space）を 3 回：振りかぶる → 強さを決める → ジャストで投げる'
       : info.phase === 'power' ? 'ほしい強さのところで押す'
@@ -1994,17 +2067,60 @@ function showFlyResult(f) {
   $('fly-result-grade').textContent = sw ? `${GRADE_TEXT[sw.grade]}　強さ ${Math.round(sw.power * 100)}%` : '';
   const side = Math.abs(f.lateral) < 0.05 ? 'まっすぐ' : `${f.lateral > 0 ? '左' : '右'}へ ${Math.abs(f.lateral).toFixed(2)} m`;
   $('fly-result-sub').textContent = `${f.speed.toFixed(1)} m/s・${Math.round(f.angle)}°で投げて、滞空 ${f.time.toFixed(2)} 秒・${side}${f.wind && f.wind.speed >= 0.05 ? `・${describeWind(f.wind, course.yaw).text}` : ''}`;
-  $('fly-result').hidden = false;
+  // 落ちた様子を見てから、結果を出す
+  clearTimeout(resultTimer);
+  resultTimer = setTimeout(() => {
+    if (mode === 'fly' && course.phase === 'landed') $('fly-result').hidden = false;
+  }, RESULT_DELAY);
+}
+
+const RESULT_DELAY = 1100; // 着地してから結果を出すまで [ms]
+let resultTimer = 0;
+
+function hideResult() {
+  clearTimeout(resultTimer);
+  $('fly-result').hidden = true;
 }
 
 function flyAgain() {
-  $('fly-result').hidden = true;
+  hideResult();
+  $('replay-bar').hidden = true;
   course.reset();
 }
 
 function flyPress(e) {
-  $('fly-result').hidden = true;
+  hideResult();
   course.press(e?.timeStamp ?? performance.now());
+}
+
+// 結果をたたむ / ひらく（落ちた所をよく見たいとき）
+function toggleResultMin(force) {
+  const el = $('fly-result');
+  const on = force ?? !el.classList.contains('min-on');
+  el.classList.toggle('min-on', on);
+  $('btn-result-min').textContent = on ? '▴' : '▾';
+}
+
+// ---------------------------------------------------------------- リプレイ
+
+let replaySpeed = 1;
+
+function startReplay() {
+  if (!course.flight || (course.phase !== 'landed' && course.phase !== 'replay')) return;
+  hideResult();
+  $('replay-bar').hidden = false;
+  course.replay(replaySpeed);
+}
+
+function setReplaySpeed(v) {
+  replaySpeed = v;
+  course.setReplaySpeed(v);
+  for (const b of document.querySelectorAll('#replay-bar [data-speed]')) b.classList.toggle('on', +b.dataset.speed === v);
+}
+
+function endReplayUi() {
+  $('replay-bar').hidden = true;
+  if (mode === 'fly') $('fly-result').hidden = false;
 }
 
 function flyKeyDown(e) {
@@ -2019,6 +2135,9 @@ function flyKeyDown(e) {
   else if (k === 'ArrowRight') { e.preventDefault(); course.setYaw(course.yaw - 1); }
   else if (k.toLowerCase() === 'c') course.setView(nextView());
   else if (k === 'Enter' && course.phase === 'landed') flyAgain();
+  else if (k.toLowerCase() === 'p' && (course.phase === 'landed' || course.phase === 'replay')) startReplay();
+  else if (k.toLowerCase() === 'h' && course.phase === 'landed') toggleResultMin();
+  else if (k === 'Escape' && course.phase === 'replay') course.stopReplay();
   else if (k.toLowerCase() === 'a' && course.phase === 'landed') enterAnalysis();
   else if (k.toLowerCase() === 'r') toggleRanking();
   else if (k.toLowerCase() === 'w') course.setWindEnabled(!course.windEnabled);
@@ -2132,12 +2251,23 @@ $('link-wings').onchange = (e) => store.set('origami.linkWings', e.target.checke
 analysis = new Analysis({ renderer, canvas });
 resize();
 $('btn-analyze').onclick = enterAnalysis;
+$('an-help').onclick = () => showAnalysisGuide(true);
+$('ag-close').onclick = () => showAnalysisGuide(false);
+$('ag-ok').onclick = () => showAnalysisGuide(false);
+$('an-guide').addEventListener('click', (e) => { if (e.target.id === 'an-guide') showAnalysisGuide(false); });
+$('btn-replay').onclick = startReplay;
+$('btn-result-min').onclick = () => toggleResultMin();
+$('rp-again').onclick = startReplay;
+$('rp-stop').onclick = () => course.stopReplay();
+$('rp-view').onclick = () => { course.setView(nextView()); updateFlyStatic(); };
+for (const b of document.querySelectorAll('#replay-bar [data-speed]')) b.onclick = () => setReplaySpeed(+b.dataset.speed);
 $('an-back').onclick = exitAnalysis;
 $('an-again').onclick = () => { exitAnalysis(); flyAgain(); };
 $('an-refold').onclick = () => { exitAnalysis(); exitFly(); };
 $('an-play').onclick = toggleAnalysisPlay;
 $('an-time').oninput = (e) => { an.playing = false; $('an-play').textContent = '▶'; setAnalysisTime(+e.target.value); };
 $('an-time').onchange = (e) => setAnalysisTime(+e.target.value, true);
+for (const b of document.querySelectorAll('#analysis [data-fold]')) b.onclick = () => toggleAnalysisPanel(b.dataset.fold);
 for (const cb of document.querySelectorAll('#analysis [data-show]')) {
   cb.onchange = () => analysis.setShow(cb.dataset.show, cb.checked);
 }

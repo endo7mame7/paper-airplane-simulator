@@ -78,7 +78,7 @@ export class Analysis {
     this.controls.minDistance = 0.5;
     this.controls.maxDistance = 8;
     this.controls.enabled = false;
-    this.show = { flow: true, pressure: true, forces: true, vortex: true };
+    this.show = { flow: true, pressure: true, forces: true, vortex: true, labels: true };
 
     this.scene.add(new THREE.HemisphereLight(0xdbeafe, 0x0b1626, 1.4));
     const sun = new THREE.DirectionalLight(0xffffff, 1.2);
@@ -156,8 +156,9 @@ export class Analysis {
     for (const l of [this.cgLabel, this.acLabel, this.liftLabel, this.dragLabel, this.weightLabel, this.windLabel]) {
       l.scale.copy(l.userData.base).multiplyScalar(1 / this.k);
     }
-    this.cgLabel.position.set(0, 0, -0.07 / this.k);
-    this.acLabel.position.set(-aero.staticMargin * aero.mac, 0, 0.07 / this.k);
+    // 重心は下うしろ、空力中心は上まえにずらして、文字どうしが重ならないように
+    this.cgLabel.position.set(-0.12 / this.k, 0, -0.1 / this.k);
+    this.acLabel.position.set(-aero.staticMargin * aero.mac + 0.14 / this.k, 0, 0.1 / this.k);
     this.controls.target.set(0, 0, 0);
     this.camera.position.set(-1.4, -2.3, 1.1);
     this.lastKey = null;
@@ -351,6 +352,7 @@ export class Analysis {
     const acPos = new THREE.Vector3(-a.staticMargin * a.mac, 0, 0);
     setA(this.liftArrow, this.liftLabel, lift, L * unit, acPos);
     setA(this.dragArrow, this.dragLabel, wind, D * unit, acPos);
+    this.dragLabel.position.z -= 0.08 / this.k; // 空力中心の文字と重ならないよう少し下へ
     // 重さは真下（機体はピッチ角 θ だけ傾いているので、機体座標では θ だけ回る）
     const th = p.theta;
     const down = new THREE.Vector3(Math.sin(th), 0, -Math.cos(th));
@@ -372,6 +374,23 @@ export class Analysis {
     this.flowGroup.visible = this.show.flow;
     this.vortexGroup.visible = this.show.vortex;
     this.forceGroup.visible = this.show.forces;
+    for (const l of [this.cgLabel, this.acLabel, this.liftLabel, this.dragLabel, this.weightLabel, this.windLabel]) l.visible = this.show.labels;
+  }
+
+  // パネルに隠れない空き領域 r（画面の座標、px）の真ん中に、収まる大きさで映す
+  setFrame(W, H, r) {
+    this.frame = { W, H, r };
+    this.applyFrame();
+  }
+
+  applyFrame() {
+    if (!this.frame) return;
+    const { W, H, r } = this.frame;
+    const cx = r.x + r.w / 2;
+    const cy = r.y + r.h / 2;
+    this.camera.setViewOffset(W, H, W / 2 - cx, H / 2 - cy, W, H);
+    this.camera.zoom = Math.max(0.3, Math.min(1, Math.min(r.w / W, r.h / H) * 1.15));
+    this.camera.updateProjectionMatrix();
   }
 
   update(dt) {
@@ -404,6 +423,7 @@ export class Analysis {
   resize(w, h) {
     this.camera.aspect = w / Math.max(1, h);
     this.camera.updateProjectionMatrix();
+    this.applyFrame();
   }
 
   render() {
