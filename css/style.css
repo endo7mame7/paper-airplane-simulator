@@ -186,15 +186,41 @@ body.fly #view { cursor: default; }
 body.fly #panel { display: none; }
 #btn-throw { padding: 12px 20px; font-size: 15px; font-weight: 700; user-select: none; -webkit-user-select: none; touch-action: none; }
 button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+/* 結果：画面の下に小さく出す（落ちた紙飛行機が見えるように） */
 #fly-result {
-  position: absolute; left: 50%; top: 92px; transform: translateX(-50%);
-  background: rgba(255,255,255,.95); border-radius: 16px; padding: 18px 26px; text-align: center;
-  box-shadow: 0 8px 30px rgba(0,0,0,.2); pointer-events: auto; min-width: 240px;
+  position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
+  width: min(620px, calc(100% - 24px)); background: rgba(255,255,255,.94); border-radius: 16px; padding: 10px 16px 12px;
+  box-shadow: 0 6px 24px rgba(0,0,0,.18); pointer-events: auto; animation: res-in .35s ease-out;
 }
+@keyframes res-in { from { transform: translate(-50%, 20px); opacity: 0; } }
 #fly-result[hidden] { display: none; }
-#fly-result .label { color: var(--muted); font-size: 13px; }
-#fly-result .big { font-size: 46px; font-weight: 800; font-variant-numeric: tabular-nums; }
-#fly-result .row { justify-content: center; margin-top: 12px; }
+#fly-result .min { position: absolute; top: 6px; right: 8px; padding: 0 8px; font-size: 14px; line-height: 22px; }
+.res-main { display: flex; align-items: center; gap: 16px; padding-right: 28px; }
+.res-dist { white-space: nowrap; }
+#fly-result .label { color: var(--muted); font-size: 12px; }
+#fly-result .big { font-size: 34px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.res-info { min-width: 0; }
+#fly-result .small { color: #5d544b; }
+#fly-result .row { justify-content: center; margin-top: 8px; flex-wrap: wrap; }
+/* たたんだとき：距離だけの小さな札 */
+#fly-result.min-on { width: auto; padding: 6px 44px 6px 14px; }
+#fly-result.min-on .res-info, #fly-result.min-on .res-btns { display: none; }
+#fly-result.min-on .big { font-size: 22px; }
+#fly-result.min-on .min { top: 7px; }
+body.landed #fly-controls, body.replaying #fly-controls { display: none; }
+#replay-bar {
+  position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); display: flex; align-items: center; gap: 8px;
+  background: rgba(20,24,30,.78); color: #fff; padding: 8px 12px; border-radius: 14px; pointer-events: auto; flex-wrap: wrap; justify-content: center;
+}
+#replay-bar[hidden] { display: none; }
+.rp-label { font-weight: 800; letter-spacing: .05em; margin-right: 4px; }
+.rp-speed { display: flex; border-radius: 8px; overflow: hidden; }
+.rp-speed button { border-radius: 0; padding: 4px 10px; }
+.rp-speed button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+@media (max-width: 760px) {
+  .res-main { flex-direction: column; align-items: flex-start; gap: 2px; }
+  #fly-result .big { font-size: 28px; }
+}
 @media (max-width: 760px) {
   #fly-dist { font-size: 32px; }
   #swing { width: 260px; }

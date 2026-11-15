@@ -1403,6 +1403,7 @@ let lastRecordId = null; // 最後に記録した 1 投
 const course = new Course({
   renderer, paperGeom, edgeGeom, frontMat, backMat,
   onLanded: (f) => showFlyResult(f),
+  onReplayEnd: () => endReplayUi(),
   onUpdate: (info) => updateFlyHud(info),
   onSwing: (sw) => showGrade(sw),
   onWind: () => updateWindHud(),
@@ -1828,6 +1829,8 @@ function enterFly() {
   document.body.classList.add('fly');
   $('fly-hud').hidden = false;
   $('fly-result').hidden = true;
+  $('replay-bar').hidden = true;
+  toggleResultMin(false);
   $('btn-fly').textContent = '✎ 折る';
   controls.enabled = false;
   snapRing.visible = false;
@@ -1837,7 +1840,9 @@ function enterFly() {
 
 function exitFly() {
   mode = 'fold';
-  document.body.classList.remove('fly');
+  hideResult();
+  $('replay-bar').hidden = true;
+  document.body.classList.remove('fly', 'landed', 'replaying');
   $('fly-hud').hidden = true;
   $('btn-fly').textContent = '✈ 飛ばす';
   controls.enabled = true;
@@ -1878,9 +1883,13 @@ function updateFlyHud(info) {
   const sp = info.flight?.speed ?? (info.phase === 'power' || info.phase === 'impact' ? speedFromPower(pw) : null);
   $('fly-speed').textContent = sp ? `${sp.toFixed(1)} m/s` : '';
   $('btn-throw').textContent = THROW_LABEL[info.phase] ?? '振りかぶる';
-  const flying = info.phase === 'flying' || info.phase === 'landed';
+  const flying = info.phase === 'flying' || info.phase === 'landed' || info.phase === 'replay';
+  document.body.classList.toggle('landed', info.phase === 'landed');
+  document.body.classList.toggle('replaying', info.phase === 'replay');
   $('fly-dist').firstChild.textContent = (flying ? info.distance : 0).toFixed(2);
-  $('fly-sub').textContent = info.phase === 'flying'
+  $('fly-sub').textContent = info.phase === 'replay'
+    ? `リプレイ　${info.t.toFixed(1)} 秒・高さ ${info.height.toFixed(2)} m`
+    : info.phase === 'flying'
     ? `${info.t.toFixed(1)} 秒・高さ ${info.height.toFixed(2)} m（Space で飛ばす）`
     : info.phase === 'ready' ? 'ボタン（Space）を 3 回：振りかぶる → 強さを決める → ジャストで投げる'
       : info.phase === 'power' ? 'ほしい強さのところで押す'
@@ -1994,17 +2003,60 @@ function showFlyResult(f) {
   $('fly-result-grade').textContent = sw ? `${GRADE_TEXT[sw.grade]}　強さ ${Math.round(sw.power * 100)}%` : '';
   const side = Math.abs(f.lateral) < 0.05 ? 'まっすぐ' : `${f.lateral > 0 ? '左' : '右'}へ ${Math.abs(f.lateral).toFixed(2)} m`;
   $('fly-result-sub').textContent = `${f.speed.toFixed(1)} m/s・${Math.round(f.angle)}°で投げて、滞空 ${f.time.toFixed(2)} 秒・${side}${f.wind && f.wind.speed >= 0.05 ? `・${describeWind(f.wind, course.yaw).text}` : ''}`;
-  $('fly-result').hidden = false;
+  // 落ちた様子を見てから、結果を出す
+  clearTimeout(resultTimer);
+  resultTimer = setTimeout(() => {
+    if (mode === 'fly' && course.phase === 'landed') $('fly-result').hidden = false;
+  }, RESULT_DELAY);
+}
+
+const RESULT_DELAY = 1100; // 着地してから結果を出すまで [ms]
+let resultTimer = 0;
+
+function hideResult() {
+  clearTimeout(resultTimer);
+  $('fly-result').hidden = true;
 }
 
 function flyAgain() {
-  $('fly-result').hidden = true;
+  hideResult();
+  $('replay-bar').hidden = true;
   course.reset();
 }
 
 function flyPress(e) {
-  $('fly-result').hidden = true;
+  hideResult();
   course.press(e?.timeStamp ?? performance.now());
+}
+
+// 結果をたたむ / ひらく（落ちた所をよく見たいとき）
+function toggleResultMin(force) {
+  const el = $('fly-result');
+  const on = force ?? !el.classList.contains('min-on');
+  el.classList.toggle('min-on', on);
+  $('btn-result-min').textContent = on ? '▴' : '▾';
+}
+
+// ---------------------------------------------------------------- リプレイ
+
+let replaySpeed = 1;
+
+function startReplay() {
+  if (!course.flight || (course.phase !== 'landed' && course.phase !== 'replay')) return;
+  hideResult();
+  $('replay-bar').hidden = false;
+  course.replay(replaySpeed);
+}
+
+function setReplaySpeed(v) {
+  replaySpeed = v;
+  course.setReplaySpeed(v);
+  for (const b of document.querySelectorAll('#replay-bar [data-speed]')) b.classList.toggle('on', +b.dataset.speed === v);
+}
+
+function endReplayUi() {
+  $('replay-bar').hidden = true;
+  if (mode === 'fly') $('fly-result').hidden = false;
 }
 
 function flyKeyDown(e) {
@@ -2019,6 +2071,9 @@ function flyKeyDown(e) {
   else if (k === 'ArrowRight') { e.preventDefault(); course.setYaw(course.yaw - 1); }
   else if (k.toLowerCase() === 'c') course.setView(nextView());
   else if (k === 'Enter' && course.phase === 'landed') flyAgain();
+  else if (k.toLowerCase() === 'p' && (course.phase === 'landed' || course.phase === 'replay')) startReplay();
+  else if (k.toLowerCase() === 'h' && course.phase === 'landed') toggleResultMin();
+  else if (k === 'Escape' && course.phase === 'replay') course.stopReplay();
   else if (k.toLowerCase() === 'a' && course.phase === 'landed') enterAnalysis();
   else if (k.toLowerCase() === 'r') toggleRanking();
   else if (k.toLowerCase() === 'w') course.setWindEnabled(!course.windEnabled);
@@ -2132,6 +2187,12 @@ $('link-wings').onchange = (e) => store.set('origami.linkWings', e.target.checke
 analysis = new Analysis({ renderer, canvas });
 resize();
 $('btn-analyze').onclick = enterAnalysis;
+$('btn-replay').onclick = startReplay;
+$('btn-result-min').onclick = () => toggleResultMin();
+$('rp-again').onclick = startReplay;
+$('rp-stop').onclick = () => course.stopReplay();
+$('rp-view').onclick = () => { course.setView(nextView()); updateFlyStatic(); };
+for (const b of document.querySelectorAll('#replay-bar [data-speed]')) b.onclick = () => setReplaySpeed(+b.dataset.speed);
 $('an-back').onclick = exitAnalysis;
 $('an-again').onclick = () => { exitAnalysis(); flyAgain(); };
 $('an-refold').onclick = () => { exitAnalysis(); exitFly(); };

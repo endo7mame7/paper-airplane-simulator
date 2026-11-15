@@ -12,6 +12,7 @@ import { randomWind, windVector, windField, CALM } from './wind.js';
 const RAD = Math.PI / 180;
 const HAND = new THREE.Vector3(0, 0, 1.6); // 手を離す位置（flight.js の height と合わせる）
 // 腕（肩から手まで 0.6m、肩の高さ 1.38m）を前に振り上げて、手が HAND の高さになる角度
+const REPLAY_PREROLL = 0.45; // リプレイで、投げる前に振りかぶる時間 [s]
 const HIP = 0.88;        // 腰の高さ（上半身を回す中心）
 const SHOULDER_Z = 1.38; // 肩の高さ
 const RELEASE_ARM = Math.PI - Math.acos((HAND.z - SHOULDER_Z) / 0.6);
@@ -302,7 +303,7 @@ export class Course {
   updateWind(dt) {
     this.clock += dt;
     // 飛んでいる間は、飛行計算と同じ時刻の風
-    const t = this.phase === 'flying' || this.phase === 'landed' ? this.flightT : this.clock;
+    const t = this.onPath() ? this.flightT : this.clock;
     const v = windVector(this.wind, t);
     const sp = Math.hypot(v[0], v[1]);
     // 吹き流し：風下を向き、弱い風ではだらりと下がる
@@ -465,6 +466,29 @@ export class Course {
     this.yaw = Math.max(-maxYaw, Math.min(maxYaw, Math.round(deg)));
   }
 
+  // 紙飛行機が記録した道すじにそって動いているか（飛行中・着地後・リプレイ中）
+  onPath() {
+    return this.phase === 'flying' || this.phase === 'landed' || (this.phase === 'replay' && this.replayT >= 0);
+  }
+
+  // 投げた 1 投を、振りかぶる所からもう一度見せる（記録はしない）
+  replay(speed = 1) {
+    if (!this.flight || (this.phase !== 'landed' && this.phase !== 'replay')) return false;
+    this.phase = 'replay';
+    this.replaySpeed = speed;
+    this.replayT = -REPLAY_PREROLL;
+    this.flightT = 0;
+    return true;
+  }
+
+  setReplaySpeed(speed) { this.replaySpeed = speed; }
+
+  // リプレイを終わりまで飛ばす
+  stopReplay() {
+    if (this.phase !== 'replay') return;
+    this.replayT = this.flight.time;
+  }
+
   // スイングメーターのカーソルを、押した時刻 now [ms] から求める（画面の更新の速さに左右されない）
   cursorAt(now) {
     const sec = (now - this.phaseStart) / 1000;
@@ -475,6 +499,7 @@ export class Course {
 
   // ボタンを押した（スイングメーターを進める）
   press(now = performance.now()) {
+    if (this.phase === 'replay') { this.stopReplay(); return; }
     if (this.phase === 'landed') { this.reset(); return; }
     if (!this.aero) return;
     if (this.phase === 'ready') {
@@ -547,7 +572,11 @@ export class Course {
       const k = Math.min(1, this.throwAnim / 0.08);
       armAngle = from + (RELEASE_ARM - from) * k;
       if (k >= 1) { this.phase = 'flying'; this.flightT = 0; }
-    } else if (this.phase === 'flying' || this.phase === 'landed') {
+    } else if (this.phase === 'replay' && this.replayT < 0) {
+      // リプレイの最初：振りかぶってから投げる
+      const k = Math.max(0, (this.replayT + REPLAY_PREROLL) / REPLAY_PREROLL);
+      armAngle = -1.8 + (1.8 + RELEASE_ARM) * k * k;
+    } else if (this.onPath()) {
       armAngle = 1.4;
     } else {
       armAngle = RELEASE_ARM; // 構え：腕を前に出して紙飛行機を持つ
@@ -556,7 +585,7 @@ export class Course {
     this.shoulder.rotation.y = -armAngle;
     // 振りかぶるほど上半身をひねり（右肩を後ろへ）、左腕を前に出して狙う。手を離す瞬間はひねりなし
     const windup = Math.max(0, Math.min(1, (RELEASE_ARM - armAngle) / (RELEASE_ARM + 1.8)));
-    const after = this.phase === 'flying' || this.phase === 'landed'
+    const after = this.onPath()
       ? Math.max(0, 1 - Math.abs(this.flightT - 0.35) / 0.6) : 0; // 投げたあとの前かがみ
     this.upper.rotation.set(0, 0.28 * after, -0.55 * windup, 'ZYX');
     this.lShoulder.rotation.y = -(0.25 + 1.2 * windup) + 0.6 * after;
@@ -570,6 +599,15 @@ export class Course {
     );
 
     // 紙飛行機
+    if (this.phase === 'replay') {
+      this.replayT += dt * this.replaySpeed;
+      this.flightT = Math.max(0, this.replayT);
+      if (this.replayT >= this.flight.time) {
+        this.flightT = this.flight.time;
+        this.phase = 'landed';
+        this.o.onReplayEnd?.(this.flight);
+      }
+    }
     if (this.phase === 'flying') {
       this.flightT += dt;
       if (this.flightT >= this.flight.time) {
@@ -580,7 +618,7 @@ export class Course {
       }
     }
     let pose;
-    if ((this.phase === 'flying' || this.phase === 'landed') && this.flight) {
+    if (this.onPath() && this.flight) {
       pose = samplePath(this.flight.path, this.flightT);
     } else {
       // 手に持っている
@@ -590,7 +628,13 @@ export class Course {
       // 手の少し前に機体の重心
       hp.x += Math.cos(yaw) * 0.04;
       hp.y += Math.sin(yaw) * 0.04;
-      pose = { pos: [hp.x, hp.y, hp.z], theta: this.angle * RAD, phi: 0, psi: yaw };
+      const replaying = this.phase === 'replay' && this.flight;
+      pose = {
+        pos: [hp.x, hp.y, hp.z],
+        theta: (replaying ? this.flight.angle : this.angle) * RAD,
+        phi: 0,
+        psi: replaying ? this.flight.yaw * RAD : yaw,
+      };
     }
     this.updateTrail();
     if (pose) {
@@ -627,7 +671,7 @@ export class Course {
 
   updateTrail() {
     const pts = [];
-    if (this.flight && (this.phase === 'flying' || this.phase === 'landed')) {
+    if (this.flight && this.onPath()) {
       for (const p of this.flight.path) {
         if (p.t > this.flightT) break;
         pts.push(...p.pos);
@@ -723,7 +767,7 @@ export class Course {
     if (this.introT !== undefined && this.introT < 2.5) this.introT += dt;
     // 構え〜投げた直後は三人称視点。「見送る」なら飛んでいる間も投げる人の後ろから見る
     const watch = this.view === 'thrower';
-    const justThrown = this.phase === 'flying' && this.flightT < 0.45;
+    const justThrown = (this.phase === 'flying' || this.phase === 'replay') && this.flightT < 0.45;
     if (['ready', 'power', 'impact', 'throwing'].includes(this.phase) || justThrown) {
       goal = this.resetCamera(false);
     } else if (watch) {
@@ -750,7 +794,7 @@ export class Course {
     }
     // 演出中はゆっくり、そのあとは速く追う
     const intro = this.introT !== undefined && this.introT < 2.5;
-    const k = 1 - Math.exp(-dt * (this.phase === 'flying' ? 7 : intro ? 1.8 : 3));
+    const k = 1 - Math.exp(-dt * (this.phase === 'flying' || this.phase === 'replay' ? 7 : intro ? 1.8 : 3));
     this.camera.position.lerp(goal.pos, k);
     this.camLook = (this.camLook ?? goal.look.clone()).lerp(goal.look, k);
     this.camera.lookAt(this.camLook);

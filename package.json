@@ -1,6 +1,6 @@
 {
   "name": "paper-airplane-simulator",
-  "version": "1.12.0",
+  "version": "1.13.0",
   "description": "紙飛行機を折って、投げて、飛距離を競う 3D ゲーム",
   "type": "module",
   "private": true,
