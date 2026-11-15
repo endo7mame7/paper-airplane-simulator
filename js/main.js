@@ -1352,6 +1352,7 @@ function resize() {
   renderer.setSize(r.width, r.height, false);
   course.resize(r.width, r.height);
   analysis?.resize(r.width, r.height);
+  if (mode === 'analysis') fitAnalysisFrame();
   const prevAspect = camera.aspect;
   camera.aspect = r.width / Math.max(1, r.height);
   camera.updateProjectionMatrix();
@@ -1594,6 +1595,48 @@ function enterAnalysis() {
   an.playing = false;
   $('an-play').textContent = '▶';
   setAnalysisTime(an.t, true);
+  // 狭い画面では、はじめから診断をたたんでおく
+  for (const id of ['an-side', 'an-legend']) {
+    $(id).classList.toggle('folded', window.innerWidth < 900);
+    $(id).querySelector('.an-fold').textContent = $(id).classList.contains('folded') ? '＋' : '－';
+  }
+  fitAnalysisFrame();
+}
+
+// パネルに隠れない空き領域を求めて、3D をそこに合わせる
+function fitAnalysisFrame() {
+  const c = canvas.getBoundingClientRect();
+  const W = c.width, H = c.height;
+  let x0 = 0, x1 = W, y0 = 0, y1 = H;
+  const box = (id) => {
+    const el = $(id);
+    if (!el || getComputedStyle(el).display === 'none') return null;
+    const r = el.getBoundingClientRect();
+    return { l: r.left - c.left, r: r.right - c.left, t: r.top - c.top, b: r.bottom - c.top };
+  };
+  const top = document.querySelector('.an-top').getBoundingClientRect();
+  y0 = Math.max(y0, top.bottom - c.top + 6);
+  const bottom = box('an-bottom');
+  if (bottom) y1 = Math.min(y1, bottom.t - 6);
+  const side = box('an-side');
+  // 左のパネル：横に置いてあるときは左はしを、下に置いてある（狭い画面）ときは下はしを削る
+  if (side) {
+    if (side.r < W * 0.45 && side.b - side.t > (y1 - y0) * 0.4) x0 = Math.max(x0, side.r + 6);
+    else if (side.t > H * 0.4) y1 = Math.min(y1, side.t - 6);
+  }
+  const legend = box('an-legend');
+  if (legend && legend.l > W * 0.55 && legend.b - legend.t > (y1 - y0) * 0.4) x1 = Math.min(x1, legend.l - 6);
+  if (x1 - x0 < 160) { x0 = 0; x1 = W; }
+  if (y1 - y0 < 120) { y0 = 0; y1 = H; }
+  analysis.setFrame(W, H, { x: x0, y: y0, w: x1 - x0, h: y1 - y0 });
+}
+
+function toggleAnalysisPanel(id) {
+  const el = $(id);
+  el.classList.toggle('folded');
+  const b = el.querySelector('.an-fold');
+  if (id !== 'an-bottom') b.textContent = el.classList.contains('folded') ? '＋' : '－';
+  fitAnalysisFrame();
 }
 
 function exitAnalysis() {
@@ -1741,6 +1784,9 @@ function analysisKeyDown(e) {
   else if (e.key === ' ') { e.preventDefault(); toggleAnalysisPlay(); }
   else if (e.key === 'ArrowRight') { e.preventDefault(); setAnalysisTime(an.t + 0.1, true); }
   else if (e.key === 'ArrowLeft') { e.preventDefault(); setAnalysisTime(an.t - 0.1, true); }
+  else if (e.key.toLowerCase() === 'd') toggleAnalysisPanel('an-side');
+  else if (e.key.toLowerCase() === 'l') toggleAnalysisPanel('an-legend');
+  else if (e.key.toLowerCase() === 'g') toggleAnalysisPanel('an-bottom');
 }
 
 // ================================================================ ローディング画面（準備画面 → コース）
@@ -2199,6 +2245,7 @@ $('an-refold').onclick = () => { exitAnalysis(); exitFly(); };
 $('an-play').onclick = toggleAnalysisPlay;
 $('an-time').oninput = (e) => { an.playing = false; $('an-play').textContent = '▶'; setAnalysisTime(+e.target.value); };
 $('an-time').onchange = (e) => setAnalysisTime(+e.target.value, true);
+for (const b of document.querySelectorAll('#analysis [data-fold]')) b.onclick = () => toggleAnalysisPanel(b.dataset.fold);
 for (const cb of document.querySelectorAll('#analysis [data-show]')) {
   cb.onchange = () => analysis.setShow(cb.dataset.show, cb.checked);
 }
