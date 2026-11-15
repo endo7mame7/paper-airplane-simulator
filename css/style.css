@@ -423,3 +423,28 @@ button.ver.link:hover { color: var(--accent); }
 .an-legend .an-body { margin-top: 8px; }
 .an-side.folded, .an-legend.folded { width: auto; }
 .an-bottom.folded .an-fold { background: rgba(255,255,255,.04); }
+
+/* 分析モードの見方 */
+#an-guide { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(5,10,20,.55); z-index: 5; }
+#an-guide[hidden] { display: none; }
+.ag-box { width: 620px; max-width: 100%; max-height: 100%; display: flex; flex-direction: column; background: #0f1d31; color: #e5eefb; border: 1px solid rgba(148,180,220,.25); border-radius: 18px; box-shadow: 0 16px 50px rgba(0,0,0,.5); }
+.ag-head { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px 6px; }
+.ag-head h2 { margin: 0; font-size: 19px; }
+.ag-head button { padding: 2px 10px; }
+.ag-body { overflow-y: auto; padding: 0 18px 4px; line-height: 1.7; font-size: 14px; }
+.ag-body h3 { margin: 14px 0 4px; font-size: 14px; color: #93c5fd; letter-spacing: .05em; }
+.ag-body b { color: #fff; }
+.ag-lead { margin: 4px 0 0; }
+.ag-steps { margin: 4px 0; padding-left: 1.4em; }
+.ag-list { list-style: none; margin: 4px 0; padding: 0; }
+.ag-list li { position: relative; padding-left: 26px; margin: 3px 0; }
+.ag-list li:not(:has(.chip))::before { content: "・"; position: absolute; left: 6px; color: #7d93b2; }
+.chip { position: absolute; left: 2px; top: .45em; width: 16px; height: 10px; border-radius: 3px; }
+.chip.round { width: 12px; height: 12px; border-radius: 50%; left: 4px; top: .4em; }
+.chip.bar { width: 18px; height: 8px; top: .55em; }
+.chip.bar.speed { background: linear-gradient(90deg, #2f6fd6, #e8f6ff, #ff5a3c); }
+.chip.bar.press { background: linear-gradient(90deg, #1d4ed8, #f5f5f4, #dc2626); }
+.ag-tip { margin: 4px 0 0; padding: 8px 12px; background: rgba(147,197,253,.08); border-radius: 8px; font-size: 13px; }
+.ag-note { font-size: 12px; color: #9fb4d0; margin: 14px 0 8px; }
+.ag-foot { padding: 8px 18px 14px; text-align: right; }
+.ag-foot button { padding: 8px 22px; }

@@ -1601,6 +1601,8 @@ function enterAnalysis() {
     $(id).querySelector('.an-fold').textContent = $(id).classList.contains('folded') ? '＋' : '－';
   }
   fitAnalysisFrame();
+  // はじめて分析モードを開いたときは、見方を出す
+  showAnalysisGuide(!store.get('origami.anGuideSeen', false));
 }
 
 // パネルに隠れない空き領域を求めて、3D をそこに合わせる
@@ -1779,7 +1781,23 @@ function toggleAnalysisPlay() {
   if (!an.playing) setAnalysisTime(an.t, true);
 }
 
+function showAnalysisGuide(show = true) {
+  $('an-guide').hidden = !show;
+  if (show) {
+    an.playing = false;
+    $('an-play').textContent = '▶';
+    $('an-guide').querySelector('.ag-body').scrollTop = 0;
+  } else {
+    store.set('origami.anGuideSeen', true);
+  }
+}
+
 function analysisKeyDown(e) {
+  if (!$('an-guide').hidden) {
+    if (e.key === 'Escape' || e.key === 'Enter' || e.key === '?') { e.preventDefault(); showAnalysisGuide(false); }
+    return;
+  }
+  if (e.key === '?') { showAnalysisGuide(true); return; }
   if (e.key === 'Escape') exitAnalysis();
   else if (e.key === ' ') { e.preventDefault(); toggleAnalysisPlay(); }
   else if (e.key === 'ArrowRight') { e.preventDefault(); setAnalysisTime(an.t + 0.1, true); }
@@ -2233,6 +2251,10 @@ $('link-wings').onchange = (e) => store.set('origami.linkWings', e.target.checke
 analysis = new Analysis({ renderer, canvas });
 resize();
 $('btn-analyze').onclick = enterAnalysis;
+$('an-help').onclick = () => showAnalysisGuide(true);
+$('ag-close').onclick = () => showAnalysisGuide(false);
+$('ag-ok').onclick = () => showAnalysisGuide(false);
+$('an-guide').addEventListener('click', (e) => { if (e.target.id === 'an-guide') showAnalysisGuide(false); });
 $('btn-replay').onclick = startReplay;
 $('btn-result-min').onclick = () => toggleResultMin();
 $('rp-again').onclick = startReplay;
